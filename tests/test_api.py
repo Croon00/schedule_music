@@ -1,13 +1,20 @@
-from pathlib import Path
+import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.config import settings
+from app.core.config import settings
 from app.main import app
 
 
-def test_artist_can_be_created_with_x_username(tmp_path: Path) -> None:
-    settings.database_path = str(tmp_path / "test.db")
+pytestmark = pytest.mark.skipif(
+    not os.getenv("TEST_DATABASE_URL"),
+    reason="PostgreSQL API tests require TEST_DATABASE_URL.",
+)
+
+
+def test_artist_can_be_created_with_x_username() -> None:
+    settings.database_url = os.environ["TEST_DATABASE_URL"]
 
     with TestClient(app) as client:
         response = client.post(
@@ -22,8 +29,8 @@ def test_artist_can_be_created_with_x_username(tmp_path: Path) -> None:
         assert body["sources"][0]["value"] == "YOASOBI_staff"
 
 
-def test_source_can_be_added_to_artist(tmp_path: Path) -> None:
-    settings.database_path = str(tmp_path / "test.db")
+def test_source_can_be_added_to_artist() -> None:
+    settings.database_url = os.environ["TEST_DATABASE_URL"]
 
     with TestClient(app) as client:
         artist = client.post("/artists", json={"name": "Ado"}).json()

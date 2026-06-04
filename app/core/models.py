@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -36,8 +37,8 @@ class Artist(BaseModel):
     name: str
     display_name: str | None
     notes: str | None
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class SourceCreate(BaseModel):
@@ -59,8 +60,8 @@ class Source(BaseModel):
     label: str | None
     value: str
     is_active: bool
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class ArtistWithSources(Artist):
@@ -83,5 +84,5 @@ class EventCandidateCreate(BaseModel):
 
 class EventCandidate(EventCandidateCreate):
     id: int
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
