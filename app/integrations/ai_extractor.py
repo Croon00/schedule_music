@@ -39,10 +39,12 @@ EVENT_SCHEMA = {
 
 
 def openai_configured() -> bool:
+    """OpenAI API key가 설정되어 AI 추출을 실행할 수 있는지 확인합니다."""
     return bool(settings.openai_api_key)
 
 
 async def extract_music_event(artist_name: str, raw_text: str) -> dict[str, Any] | None:
+    """X 게시물 원문에서 공연/티켓 일정 정보를 JSON 형태로 추출합니다."""
     if not settings.openai_api_key:
         return None
 

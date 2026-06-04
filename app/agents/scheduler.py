@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_agent_once() -> dict[str, int]:
+    """등록된 X 출처를 한 번 순회하며 새 게시물, 일정 후보, 캘린더 등록을 처리합니다."""
     init_db()
     with get_connection() as conn:
         rows = conn.execute(
@@ -59,6 +60,7 @@ async def run_agent_once() -> dict[str, int]:
 
 
 async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
+    """아티스트의 X 계정 하나를 처리해서 새 게시물을 읽고 일정으로 변환합니다."""
     x_username = source["x_username"]
     x_user_id = source["external_user_id"] or await get_x_user_id(x_username)
     if not source["external_user_id"]:
@@ -94,6 +96,7 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
 
 
 def _update_source_x_user_id(source_id: int, x_user_id: str) -> None:
+    """X username으로 조회한 X 내부 user id를 source row에 저장합니다."""
     with get_connection() as conn:
         conn.execute(
             "UPDATE artist_sources SET external_user_id = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
@@ -103,6 +106,7 @@ def _update_source_x_user_id(source_id: int, x_user_id: str) -> None:
 
 
 def _update_last_seen(source_id: int, post_id: str) -> None:
+    """다음 agent 실행 때 중복으로 읽지 않도록 마지막으로 본 X 게시물 ID를 저장합니다."""
     with get_connection() as conn:
         conn.execute(
             """
@@ -116,6 +120,7 @@ def _update_last_seen(source_id: int, post_id: str) -> None:
 
 
 def _insert_source_item(source: dict[str, Any], post: dict[str, Any]) -> bool:
+    """X 게시물 원문을 source_items에 저장하고, 이미 저장된 게시물이면 False를 반환합니다."""
     published_at = _parse_datetime(post.get("created_at"))
     with get_connection() as conn:
         try:
@@ -147,6 +152,7 @@ def _insert_event_candidate(
     post: dict[str, Any],
     extracted: dict[str, Any],
 ) -> dict[str, Any]:
+    """AI가 추출한 공연/티켓 정보를 일정 후보 테이블에 저장합니다."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
@@ -177,6 +183,7 @@ def _insert_event_candidate(
 
 
 def _insert_calendar_sync(discord_user_id: str, event_candidate_id: int, provider_event_id: str) -> None:
+    """Google Calendar에 생성된 이벤트 ID를 저장해 중복 등록을 추적합니다."""
     with get_connection() as conn:
         conn.execute(
             """
@@ -190,12 +197,14 @@ def _insert_calendar_sync(discord_user_id: str, event_candidate_id: int, provide
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
+    """X API의 ISO 문자열 시간을 Python datetime으로 변환합니다."""
     if not value:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 async def agent_loop() -> None:
+    """Railway 프로세스가 살아있는 동안 설정된 주기마다 agent를 반복 실행합니다."""
     while True:
         try:
             result = await run_agent_once()

@@ -3,6 +3,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Railway와 로컬 .env에서 읽어오는 앱 전체 설정입니다."""
+
     app_name: str = "schedule-music"
     database_url: str
     discord_bot_token: str | None = None
@@ -32,6 +34,7 @@ class Settings(BaseSettings):
     )
     @classmethod
     def empty_string_to_none(cls, value):
+        """Railway/.env의 빈 문자열 값을 Optional 필드에서 None처럼 다루게 합니다."""
         if value == "":
             return None
         return value

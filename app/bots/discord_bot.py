@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_x_username(value: str) -> str:
+    """Discord 입력값에서 앞쪽 @와 공백을 제거해 X username만 남깁니다."""
     return value.strip().lstrip("@")
 
 
@@ -27,6 +28,7 @@ def _create_artist(
     display_name: str | None,
     notes: str | None,
 ) -> dict:
+    """Discord 사용자 계정에 귀속된 아티스트와 X 출처를 DB에 함께 등록합니다."""
     normalized_x_username = _normalize_x_username(x_username)
     if not normalized_x_username:
         raise ValueError("X username is required.")
@@ -56,6 +58,7 @@ def _create_artist(
 
 
 def _delete_artist(discord_user_id: str, artist_id: int) -> bool:
+    """요청한 Discord 사용자가 소유한 아티스트만 삭제합니다."""
     with get_connection() as conn:
         cursor = conn.execute(
             "DELETE FROM artists WHERE id = %s AND discord_user_id = %s",
@@ -66,6 +69,7 @@ def _delete_artist(discord_user_id: str, artist_id: int) -> bool:
 
 
 def _list_artists(discord_user_id: str) -> list[dict]:
+    """Discord 사용자에게 등록된 아티스트와 대표 X username 목록을 조회합니다."""
     with get_connection() as conn:
         return conn.execute(
             """
@@ -87,12 +91,16 @@ def _list_artists(discord_user_id: str) -> list[dict]:
 
 
 class ScheduleMusicBot(discord.Client):
+    """schedule_music 전용 Discord slash command 봇 클라이언트입니다."""
+
     def __init__(self) -> None:
+        """Discord client와 slash command tree를 초기화합니다."""
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
+        """봇 로그인 직후 DB를 준비하고 slash command를 Discord에 동기화합니다."""
         init_db()
         if settings.discord_guild_id:
             guild = discord.Object(id=settings.discord_guild_id)
@@ -121,6 +129,7 @@ async def artist_add(
     display_name: str | None = None,
     notes: str | None = None,
 ) -> None:
+    """Discord slash command로 아티스트와 X 계정을 등록합니다."""
     await interaction.response.defer(ephemeral=True)
     try:
         artist = _create_artist(str(interaction.user.id), name, x_username, display_name, notes)
@@ -137,6 +146,7 @@ async def artist_add(
 
 @bot.tree.command(name="artist_list", description="List registered artists.")
 async def artist_list(interaction: discord.Interaction) -> None:
+    """현재 Discord 사용자가 등록한 아티스트 목록을 보여줍니다."""
     await interaction.response.defer(ephemeral=True)
     artists = _list_artists(str(interaction.user.id))
     if not artists:
@@ -156,6 +166,7 @@ async def artist_list(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="artist_delete", description="Delete an artist by ID.")
 @app_commands.describe(artist_id="Artist ID shown by /artist_list")
 async def artist_delete(interaction: discord.Interaction, artist_id: int) -> None:
+    """현재 Discord 사용자의 아티스트를 ID 기준으로 삭제합니다."""
     await interaction.response.defer(ephemeral=True)
     deleted = _delete_artist(str(interaction.user.id), artist_id)
     if deleted:
@@ -166,6 +177,7 @@ async def artist_delete(interaction: discord.Interaction, artist_id: int) -> Non
 
 @bot.tree.command(name="google_connect", description="Connect your Google Calendar.")
 async def google_connect(interaction: discord.Interaction) -> None:
+    """현재 Discord 사용자에게 Google Calendar OAuth 연결 링크를 안내합니다."""
     await interaction.response.defer(ephemeral=True)
     if google_connected(str(interaction.user.id)):
         await interaction.followup.send("Google Calendar is already connected.", ephemeral=True)
@@ -185,6 +197,7 @@ async def google_connect(interaction: discord.Interaction) -> None:
 
 
 async def start_discord_bot() -> None:
+    """토큰이 설정되어 있으면 Discord 봇을 시작하고, 없으면 비활성 상태로 둡니다."""
     if not settings.discord_bot_token:
         logger.warning("DISCORD_BOT_TOKEN is not set; Discord bot is disabled.")
         return

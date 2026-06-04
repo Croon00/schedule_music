@@ -10,10 +10,12 @@ from app.core.config import settings
 
 
 def get_connection() -> Connection:
+    """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환하게 합니다."""
     return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 
 def init_db() -> None:
+    """앱 실행에 필요한 PostgreSQL 테이블과 기존 DB용 누락 컬럼을 준비합니다."""
     with get_connection() as conn:
         conn.execute(
             """
@@ -122,6 +124,7 @@ def init_db() -> None:
 
 
 def row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """psycopg row를 일반 dict로 바꾸고, row가 없으면 None을 그대로 반환합니다."""
     if row is None:
         return None
     return dict(row)

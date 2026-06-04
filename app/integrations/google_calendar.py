@@ -17,6 +17,7 @@ GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 
 
 def google_oauth_configured() -> bool:
+    """Google OAuth에 필요한 client id, secret, redirect uri가 모두 있는지 확인합니다."""
     return bool(
         settings.google_client_id
         and settings.google_client_secret
@@ -25,6 +26,7 @@ def google_oauth_configured() -> bool:
 
 
 def get_google_redirect_uri() -> str | None:
+    """명시된 redirect uri가 있으면 쓰고, 없으면 PUBLIC_BASE_URL로 callback 주소를 만듭니다."""
     if settings.google_redirect_uri:
         return settings.google_redirect_uri
     if settings.public_base_url:
@@ -33,6 +35,7 @@ def get_google_redirect_uri() -> str | None:
 
 
 def build_google_auth_url(discord_user_id: str) -> str:
+    """Discord 사용자 ID를 state에 담은 Google Calendar 권한 요청 URL을 만듭니다."""
     redirect_uri = get_google_redirect_uri()
     if not settings.google_client_id or not redirect_uri:
         raise RuntimeError("Google OAuth is not configured.")
@@ -50,6 +53,7 @@ def build_google_auth_url(discord_user_id: str) -> str:
 
 
 async def exchange_code_for_tokens(code: str, discord_user_id: str) -> None:
+    """Google callback으로 받은 code를 access/refresh token으로 교환해 DB에 저장합니다."""
     redirect_uri = get_google_redirect_uri()
     if not settings.google_client_id or not settings.google_client_secret or not redirect_uri:
         raise RuntimeError("Google OAuth is not configured.")
@@ -72,6 +76,7 @@ async def exchange_code_for_tokens(code: str, discord_user_id: str) -> None:
 
 
 async def refresh_google_token(discord_user_id: str, token: dict[str, Any]) -> dict[str, Any]:
+    """만료가 가까운 Google access token을 refresh token으로 갱신합니다."""
     refresh_token = token.get("refresh_token")
     if not refresh_token:
         raise RuntimeError("Google refresh token is missing.")
@@ -97,6 +102,7 @@ async def refresh_google_token(discord_user_id: str, token: dict[str, Any]) -> d
 
 
 def get_google_token(discord_user_id: str) -> dict[str, Any] | None:
+    """Discord 사용자에게 저장된 Google OAuth token 정보를 조회합니다."""
     with get_connection() as conn:
         return conn.execute(
             """
@@ -109,10 +115,12 @@ def get_google_token(discord_user_id: str) -> dict[str, Any] | None:
 
 
 def google_connected(discord_user_id: str) -> bool:
+    """Discord 사용자가 Google Calendar를 연결했는지 확인합니다."""
     return get_google_token(discord_user_id) is not None
 
 
 async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> str:
+    """일정 후보 정보를 Google Calendar event로 생성하고 Google event id를 반환합니다."""
     token = get_google_token(discord_user_id)
     if not token:
         raise RuntimeError("Google Calendar is not connected.")
@@ -137,6 +145,7 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
 
 
 def _store_google_token(discord_user_id: str, token: dict[str, Any]) -> None:
+    """Google OAuth token 응답을 사용자별로 upsert 저장합니다."""
     expires_at = None
     if token.get("expires_in"):
         expires_at = datetime.now(UTC) + timedelta(seconds=int(token["expires_in"]))
@@ -172,6 +181,7 @@ def _store_google_token(discord_user_id: str, token: dict[str, Any]) -> None:
 
 
 def _to_google_event(event: dict[str, Any]) -> dict[str, Any]:
+    """내부 일정 후보 dict를 Google Calendar events.insert payload로 변환합니다."""
     description_parts = []
     if event.get("source_url"):
         description_parts.append(f"Source: {event['source_url']}")
@@ -199,5 +209,6 @@ def _to_google_event(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _add_default_duration(starts_at: str) -> str:
+    """시작 시간만 있는 일정에 기본 2시간 종료 시간을 붙입니다."""
     parsed = datetime.fromisoformat(starts_at.replace("Z", "+00:00"))
     return (parsed + timedelta(hours=2)).isoformat()
