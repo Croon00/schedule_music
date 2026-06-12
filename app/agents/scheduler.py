@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from psycopg import errors
@@ -10,10 +11,12 @@ from psycopg import errors
 from app.core.config import settings
 from app.core.db import get_connection, init_db
 from app.integrations.ai_extractor import extract_music_event, openai_configured
-from app.integrations.google_calendar import create_calendar_event, google_connected
+from app.integrations.google_calendar import create_calendar_events, google_connected
+from app.integrations.web_pages import fetch_public_page_text
 from app.integrations.x_client import fetch_recent_posts, get_x_user_id, post_url, x_configured
 
 logger = logging.getLogger(__name__)
+JST = timezone(timedelta(hours=9))
 
 
 async def run_agent_once() -> dict[str, int]:
@@ -77,17 +80,27 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
         if not inserted:
             continue
 
-        extracted = await extract_music_event(source["artist_name"], post["text"])
+        page_context = await _fetch_post_page_context(post)
+        raw_text = _combine_raw_text(post["text"], page_context)
+        extracted = await extract_music_event(source["artist_name"], post["text"], page_context)
         if not extracted:
             continue
+        _normalize_ticket_open_from_post(post, extracted)
+        _normalize_live_date_from_post(post, extracted)
 
-        event = _insert_event_candidate(source, post, extracted)
+        event = _insert_event_candidate(source, post, extracted, raw_text)
         result["events_created"] += 1
 
         if google_connected(source["discord_user_id"]):
-            provider_event_id = await create_calendar_event(source["discord_user_id"], event)
-            _insert_calendar_sync(source["discord_user_id"], event["id"], provider_event_id)
-            result["calendar_events_created"] += 1
+            provider_events = await create_calendar_events(source["discord_user_id"], event)
+            for event_type, provider_event_id in provider_events.items():
+                _insert_calendar_sync(
+                    source["discord_user_id"],
+                    event["id"],
+                    provider_event_id,
+                    event_type,
+                )
+                result["calendar_events_created"] += 1
 
     if newest_post_id:
         _update_last_seen(source["id"], newest_post_id)
@@ -151,6 +164,7 @@ def _insert_event_candidate(
     source: dict[str, Any],
     post: dict[str, Any],
     extracted: dict[str, Any],
+    raw_text: str,
 ) -> dict[str, Any]:
     """AI가 추출한 공연/티켓 정보를 일정 후보 테이블에 저장합니다."""
     with get_connection() as conn:
@@ -158,9 +172,10 @@ def _insert_event_candidate(
             """
             INSERT INTO event_candidates (
                 artist_id, discord_user_id, source_id, title, starts_at, venue,
-                ticket_opens_at, ticket_url, price_text, source_url, raw_text, status
+                ticket_opens_at, ticket_closes_at, ticket_url, price_text,
+                source_url, raw_text, status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')
             RETURNING *
             """,
             (
@@ -171,10 +186,11 @@ def _insert_event_candidate(
                 extracted.get("starts_at"),
                 extracted.get("venue"),
                 extracted.get("ticket_opens_at"),
+                extracted.get("ticket_closes_at"),
                 extracted.get("ticket_url"),
                 extracted.get("price_text"),
                 post_url(source["x_username"], post["id"]),
-                post["text"],
+                raw_text,
             ),
         )
         event = cursor.fetchone()
@@ -182,18 +198,90 @@ def _insert_event_candidate(
         return event
 
 
-def _insert_calendar_sync(discord_user_id: str, event_candidate_id: int, provider_event_id: str) -> None:
+def _insert_calendar_sync(
+    discord_user_id: str,
+    event_candidate_id: int,
+    provider_event_id: str,
+    event_type: str = "live",
+) -> None:
     """Google Calendar에 생성된 이벤트 ID를 저장해 중복 등록을 추적합니다."""
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO calendar_syncs (discord_user_id, event_candidate_id, provider_event_id)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (discord_user_id, event_candidate_id, provider) DO NOTHING
+            INSERT INTO calendar_syncs (
+                discord_user_id, event_candidate_id, provider_event_id, event_type
+            )
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (discord_user_id, event_candidate_id, provider, event_type) DO NOTHING
             """,
-            (discord_user_id, event_candidate_id, provider_event_id),
+            (discord_user_id, event_candidate_id, provider_event_id, event_type),
         )
         conn.commit()
+
+
+async def _fetch_post_page_context(post: dict[str, Any]) -> str | None:
+    urls = _extract_post_urls(post)
+    if not urls:
+        return None
+
+    chunks = []
+    for url in urls[:3]:
+        text = await fetch_public_page_text(url)
+        if text:
+            chunks.append(f"URL: {url}\n{text}")
+    return "\n\n".join(chunks) if chunks else None
+
+
+def _extract_post_urls(post: dict[str, Any]) -> list[str]:
+    urls = []
+    for item in (post.get("entities") or {}).get("urls") or []:
+        url = item.get("expanded_url") or item.get("unwound_url") or item.get("url")
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _combine_raw_text(post_text: str, page_context: str | None) -> str:
+    if not page_context:
+        return post_text
+    return f"{post_text}\n\n--- Linked page context ---\n{page_context}"
+
+
+def _normalize_ticket_open_from_post(post: dict[str, Any], extracted: dict[str, Any]) -> None:
+    """Use the post timestamp when a ticket-start announcement lacks a clear date."""
+    ticket_opens_at = extracted.get("ticket_opens_at")
+    published_at = _parse_datetime(post.get("created_at"))
+    if not ticket_opens_at or not published_at:
+        return
+
+    parsed_ticket_opens_at = _parse_datetime(ticket_opens_at)
+    if parsed_ticket_opens_at and parsed_ticket_opens_at.tzinfo is None:
+        parsed_ticket_opens_at = parsed_ticket_opens_at.replace(tzinfo=timezone.utc)
+    if parsed_ticket_opens_at and parsed_ticket_opens_at < published_at:
+        extracted["ticket_opens_at"] = published_at.astimezone(JST).isoformat()
+
+
+def _normalize_live_date_from_post(post: dict[str, Any], extracted: dict[str, Any]) -> None:
+    """Infer the first live date from compact Japanese M.D date notation."""
+    if extracted.get("starts_at") or not extracted.get("is_live_event"):
+        return
+
+    published_at = _parse_datetime(post.get("created_at"))
+    if not published_at:
+        return
+
+    match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\.(3[01]|[12]\d|0?[1-9])(?!\d)", post.get("text", ""))
+    if not match:
+        return
+
+    month = int(match.group(1))
+    day = int(match.group(2))
+    local_published = published_at.astimezone(JST)
+    year = local_published.year
+    if (month, day) < (local_published.month, local_published.day):
+        year += 1
+
+    extracted["starts_at"] = f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

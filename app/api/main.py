@@ -217,9 +217,9 @@ def create_event_candidate(payload: EventCandidateCreate) -> dict:
             """
             INSERT INTO event_candidates (
                 artist_id, source_id, title, starts_at, venue, ticket_opens_at,
-                ticket_url, price_text, source_url, raw_text, status
+                ticket_closes_at, ticket_url, price_text, source_url, raw_text, status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -229,6 +229,7 @@ def create_event_candidate(payload: EventCandidateCreate) -> dict:
                 data["starts_at"],
                 data["venue"],
                 data["ticket_opens_at"],
+                data["ticket_closes_at"],
                 data["ticket_url"],
                 data["price_text"],
                 data["source_url"],

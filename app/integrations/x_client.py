@@ -37,7 +37,7 @@ async def fetch_recent_posts(user_id: str, since_id: str | None = None) -> list[
 
     params = {
         "max_results": "5",
-        "tweet.fields": "created_at",
+        "tweet.fields": "created_at,entities",
         "exclude": "retweets,replies",
     }
     if since_id:

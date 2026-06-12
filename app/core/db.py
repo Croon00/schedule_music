@@ -59,6 +59,7 @@ def init_db() -> None:
                 starts_at TEXT,
                 venue TEXT,
                 ticket_opens_at TEXT,
+                ticket_closes_at TEXT,
                 ticket_url TEXT,
                 price_text TEXT,
                 source_url TEXT,
@@ -75,6 +76,7 @@ def init_db() -> None:
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS external_user_id TEXT")
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS last_seen_external_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
+        conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS ticket_closes_at TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS google_oauth_tokens (
@@ -113,11 +115,25 @@ def init_db() -> None:
                 discord_user_id TEXT NOT NULL,
                 event_candidate_id INTEGER NOT NULL,
                 provider TEXT NOT NULL DEFAULT 'google',
+                event_type TEXT NOT NULL DEFAULT 'live',
                 provider_event_id TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (event_candidate_id) REFERENCES event_candidates(id) ON DELETE CASCADE,
                 UNIQUE (discord_user_id, event_candidate_id, provider)
             )
+            """
+        )
+        conn.execute("ALTER TABLE calendar_syncs ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'live'")
+        conn.execute(
+            """
+            ALTER TABLE calendar_syncs
+            DROP CONSTRAINT IF EXISTS calendar_syncs_discord_user_id_event_candidate_id_provider_key
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS calendar_syncs_unique_event_type
+            ON calendar_syncs (discord_user_id, event_candidate_id, provider, event_type)
             """
         )
         conn.commit()

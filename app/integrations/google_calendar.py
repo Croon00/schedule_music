@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -144,6 +144,49 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
     return created["id"]
 
 
+async def create_calendar_events(discord_user_id: str, event: dict[str, Any]) -> dict[str, str]:
+    """Create separate calendar entries for live dates and ticket/application dates."""
+    created = {}
+    if event.get("starts_at"):
+        created["live"] = await _create_calendar_event_from_payload(
+            discord_user_id,
+            _to_google_event(event),
+        )
+    if event.get("ticket_opens_at"):
+        created["ticket"] = await _create_calendar_event_from_payload(
+            discord_user_id,
+            _to_ticket_google_event(event),
+        )
+    if not created:
+        created["notice"] = await _create_calendar_event_from_payload(
+            discord_user_id,
+            _to_google_event(event),
+        )
+    return created
+
+
+async def _create_calendar_event_from_payload(discord_user_id: str, payload: dict[str, Any]) -> str:
+    token = get_google_token(discord_user_id)
+    if not token:
+        raise RuntimeError("Google Calendar is not connected.")
+
+    expires_at = token.get("expires_at")
+    if expires_at and expires_at <= datetime.now(UTC) + timedelta(minutes=2):
+        token = await refresh_google_token(discord_user_id, token)
+
+    calendar_id = token.get("calendar_id") or settings.google_calendar_id
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            GOOGLE_CALENDAR_EVENTS_URL.format(calendar_id=calendar_id),
+            headers={"Authorization": f"Bearer {token['access_token']}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        created = response.json()
+
+    return created["id"]
+
+
 def _store_google_token(discord_user_id: str, token: dict[str, Any]) -> None:
     """Google OAuth token 응답을 사용자별로 upsert 저장합니다."""
     expires_at = None
@@ -182,19 +225,25 @@ def _store_google_token(discord_user_id: str, token: dict[str, Any]) -> None:
 
 def _to_google_event(event: dict[str, Any]) -> dict[str, Any]:
     """내부 일정 후보 dict를 Google Calendar events.insert payload로 변환합니다."""
-    description_parts = []
-    if event.get("source_url"):
-        description_parts.append(f"Source: {event['source_url']}")
-    if event.get("raw_text"):
-        description_parts.append(event["raw_text"])
+    description = _build_description(event)
 
     starts_at = event.get("starts_at")
     if starts_at:
+        if _is_date_only(starts_at):
+            end_date = date.fromisoformat(starts_at) + timedelta(days=1)
+            return {
+                "summary": event["title"],
+                "location": event.get("venue"),
+                "description": description,
+                "start": {"date": starts_at},
+                "end": {"date": end_date.isoformat()},
+            }
+
         end_at = _add_default_duration(starts_at)
         return {
             "summary": event["title"],
             "location": event.get("venue"),
-            "description": "\n\n".join(description_parts),
+            "description": description,
             "start": {"dateTime": starts_at},
             "end": {"dateTime": end_at},
         }
@@ -202,10 +251,54 @@ def _to_google_event(event: dict[str, Any]) -> dict[str, Any]:
     return {
         "summary": event["title"],
         "location": event.get("venue"),
-        "description": "\n\n".join(description_parts),
+        "description": description,
         "start": {"date": datetime.now(UTC).date().isoformat()},
         "end": {"date": datetime.now(UTC).date().isoformat()},
     }
+
+
+def _to_ticket_google_event(event: dict[str, Any]) -> dict[str, Any]:
+    title = f"티켓/응모 시작: {event['title']}"
+    if event.get("ticket_closes_at"):
+        title = f"티켓/응모 기간: {event['title']}"
+
+    starts_at = event["ticket_opens_at"]
+    payload = {
+        "summary": title,
+        "location": event.get("venue"),
+        "description": _build_description(event),
+    }
+    closes_at = event.get("ticket_closes_at")
+    if _is_date_only(starts_at):
+        end_date = date.fromisoformat(closes_at or starts_at) + timedelta(days=1)
+        payload["start"] = {"date": starts_at}
+        payload["end"] = {"date": end_date.isoformat()}
+        return payload
+
+    payload["start"] = {"dateTime": starts_at}
+    payload["end"] = {"dateTime": closes_at or _add_default_duration(starts_at)}
+    return payload
+
+
+def _build_description(event: dict[str, Any]) -> str:
+    description_parts = []
+    if event.get("source_url"):
+        description_parts.append(f"Source: {event['source_url']}")
+    if event.get("ticket_url"):
+        description_parts.append(f"Ticket: {event['ticket_url']}")
+    if event.get("price_text"):
+        description_parts.append(f"티켓 정보:\n{event['price_text']}")
+    if event.get("raw_text"):
+        description_parts.append(event["raw_text"])
+    return "\n\n".join(description_parts)
+
+
+def _is_date_only(value: str) -> bool:
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return "T" not in value
 
 
 def _add_default_duration(starts_at: str) -> str:

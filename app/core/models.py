@@ -91,6 +91,7 @@ class EventCandidateCreate(BaseModel):
     starts_at: str | None = None
     venue: str | None = None
     ticket_opens_at: str | None = None
+    ticket_closes_at: str | None = None
     ticket_url: str | None = None
     price_text: str | None = None
     source_url: str | None = None
