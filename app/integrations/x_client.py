@@ -36,7 +36,7 @@ async def fetch_recent_posts(user_id: str, since_id: str | None = None) -> list[
         raise RuntimeError("X_BEARER_TOKEN is not configured.")
 
     params = {
-        "max_results": "5",
+        "max_results": "3",
         "tweet.fields": "created_at,entities",
         "exclude": "retweets,replies",
     }

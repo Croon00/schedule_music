@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     database_url: str
     discord_bot_token: str | None = None
     discord_guild_id: int | None = None
-    agent_interval_seconds: int = 300
+    agent_interval_seconds: int = 86400
     public_base_url: str | None = None
     x_bearer_token: str | None = None
     openai_api_key: str | None = None
