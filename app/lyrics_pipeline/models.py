@@ -6,6 +6,8 @@ from enum import StrEnum
 
 class LyricsSourceType(StrEnum):
     YOUTUBE_CAPTION = "youtube_caption"
+    YOUTUBE_DESCRIPTION = "youtube_description"
+    YOUTUBE_COMMENT = "youtube_comment"
     AUDIO_TRANSCRIPT = "audio_transcript"
     USER_LYRICS = "user_lyrics"
 
@@ -49,4 +51,3 @@ class NamuWikiRender:
     text: str
     source_type: LyricsSourceType
     needs_review: bool
-

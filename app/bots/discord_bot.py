@@ -20,13 +20,18 @@ from app.integrations.google_calendar import (
     google_connected,
     google_oauth_configured,
 )
+from app.integrations.youtube_context import (
+    extract_lyrics_candidate,
+    fetch_top_comment,
+    fetch_video_description,
+)
 from app.lyrics_pipeline.clients import (
     OpenAiLyricsClient,
     OpenAiSpeechToTextClient,
     YouTubeTranscriptCaptionClient,
     YtDlpAudioDownloader,
 )
-from app.lyrics_pipeline.models import LyricsInput, RawLyrics
+from app.lyrics_pipeline.models import LyricsInput, LyricsSourceType, RawLyrics
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
 
@@ -61,7 +66,7 @@ class _NoopLyricsAiClient:
 
 
 def _normalize_x_username(value: str) -> str:
-    """Discord 입력값에서 앞쪽 @와 공백을 제거해 X username만 남깁니다."""
+    """Discord ?낅젰媛믪뿉???욎そ @? 怨듬갚???쒓굅??X username留??④퉩?덈떎."""
     return value.strip().lstrip("@")
 
 
@@ -116,6 +121,7 @@ def _caption_report(
     return "\n".join(sections).rstrip() + "\n"
 
 
+
 async def _transform_caption_preview(raw: RawLyrics) -> tuple[str | None, str | None]:
     if not settings.openai_api_key:
         return None, None
@@ -132,16 +138,49 @@ async def _transform_caption_preview(raw: RawLyrics) -> tuple[str | None, str | 
     )
 
 
+async def _fetch_context_lyrics_candidate(
+    *,
+    video_id: str,
+    youtube_url: str,
+    use_description: bool,
+    use_comment: bool,
+    language_code: str,
+) -> RawLyrics | None:
+    candidates = []
+    if use_description:
+        description = await fetch_video_description(video_id)
+        if description:
+            candidates.append((LyricsSourceType.YOUTUBE_DESCRIPTION, description))
+    if use_comment:
+        comment = await fetch_top_comment(video_id)
+        if comment:
+            candidates.append((LyricsSourceType.YOUTUBE_COMMENT, comment))
+
+    for source_type, candidate in candidates:
+        extracted = await extract_lyrics_candidate(candidate.text, candidate.source)
+        if not extracted:
+            continue
+        excerpt, _reason = extracted
+        return RawLyrics(
+            text=excerpt,
+            source_type=source_type,
+            language_code=language_code,
+            source_url=youtube_url,
+            needs_review=True,
+        )
+    return None
+
+
 def _openai_status_text(
     translation_ko: str | None,
     pronunciation_ko: str | None,
     error: str | None = None,
 ) -> str:
     if error:
-        return f"OpenAI 미리보기 변환: `실패 ({error})`"
+        return f"OpenAI 誘몃━蹂닿린 蹂?? `?ㅽ뙣 ({error})`"
     if translation_ko is None and pronunciation_ko is None:
-        return "OpenAI 미리보기 변환: `건너뜀 (OPENAI_API_KEY 미설정)`"
-    return "OpenAI 미리보기 변환: `완료`"
+        return "OpenAI 誘몃━蹂닿린 蹂?? `嫄대꼫? (OPENAI_API_KEY 誘몄꽕??`"
+    return "OpenAI 誘몃━蹂닿린 蹂?? `?꾨즺`"
 
 
 def _caption_report_path(video_id: str, discord_user_id: str) -> Path:
@@ -156,10 +195,10 @@ def _create_artist(
     display_name: str | None,
     notes: str | None,
 ) -> dict:
-    """Discord 사용자 계정에 귀속된 아티스트와 X 출처를 DB에 함께 등록합니다."""
+    """Discord ?ъ슜??怨꾩젙??洹?띾맂 ?꾪떚?ㅽ듃? X 異쒖쿂瑜?DB???④퍡 ?깅줉?⑸땲??"""
     normalized_x_username = _normalize_x_username(x_username)
     if not normalized_x_username:
-        raise ValueError("X 사용자명은 필수입니다.")
+        raise ValueError("X ?ъ슜?먮챸? ?꾩닔?낅땲??")
 
     with get_connection() as conn:
         cursor = conn.execute(
@@ -186,7 +225,7 @@ def _create_artist(
 
 
 def _delete_artist(discord_user_id: str, artist_id: int) -> bool:
-    """요청한 Discord 사용자가 소유한 아티스트만 삭제합니다."""
+    """?붿껌??Discord ?ъ슜?먭? ?뚯쑀???꾪떚?ㅽ듃留???젣?⑸땲??"""
     with get_connection() as conn:
         cursor = conn.execute(
             "DELETE FROM artists WHERE id = %s AND discord_user_id = %s",
@@ -197,7 +236,7 @@ def _delete_artist(discord_user_id: str, artist_id: int) -> bool:
 
 
 def _list_artists(discord_user_id: str) -> list[dict]:
-    """Discord 사용자에게 등록된 아티스트와 대표 X username 목록을 조회합니다."""
+    """Discord ?ъ슜?먯뿉寃??깅줉???꾪떚?ㅽ듃? ???X username 紐⑸줉??議고쉶?⑸땲??"""
     with get_connection() as conn:
         return conn.execute(
             """
@@ -219,36 +258,36 @@ def _list_artists(discord_user_id: str) -> list[dict]:
 
 
 class ScheduleMusicBot(discord.Client):
-    """schedule_music 전용 Discord slash command 봇 클라이언트입니다."""
+    """schedule_music ?꾩슜 Discord slash command 遊??대씪?댁뼵?몄엯?덈떎."""
 
     def __init__(self) -> None:
-        """Discord client와 slash command tree를 초기화합니다."""
+        """Discord client? slash command tree瑜?珥덇린?뷀빀?덈떎."""
         intents = discord.Intents.default()
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
-        """봇 로그인 직후 DB를 준비하고 slash command를 Discord에 동기화합니다."""
+        """遊?濡쒓렇??吏곹썑 DB瑜?以鍮꾪븯怨?slash command瑜?Discord???숆린?뷀빀?덈떎."""
         init_db()
         if settings.discord_guild_id:
             guild = discord.Object(id=settings.discord_guild_id)
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
-            logger.info("Discord 명령어를 길드 %s에 동기화했습니다.", settings.discord_guild_id)
+            logger.info("Discord 紐낅졊?대? 湲몃뱶 %s???숆린?뷀뻽?듬땲??", settings.discord_guild_id)
         else:
             await self.tree.sync()
-            logger.info("Discord 명령어를 전역으로 동기화했습니다.")
+            logger.info("Discord 紐낅졊?대? ?꾩뿭?쇰줈 ?숆린?뷀뻽?듬땲??")
 
 
 bot = ScheduleMusicBot()
 
 
-@bot.tree.command(name="artist_add", description="아티스트와 X 계정을 등록합니다.")
+@bot.tree.command(name="artist_add", description="?꾪떚?ㅽ듃? X 怨꾩젙???깅줉?⑸땲??")
 @app_commands.describe(
-    name="아티스트 이름",
-    x_username="@ 포함 여부와 관계없는 X 사용자명",
-    display_name="선택 표시 이름",
-    notes="선택 메모",
+    name="?꾪떚?ㅽ듃 ?대쫫",
+    x_username="@ ?ы븿 ?щ?? 愿怨꾩뾾??X ?ъ슜?먮챸",
+    display_name="?좏깮 ?쒖떆 ?대쫫",
+    notes="?좏깮 硫붾え",
 )
 async def artist_add(
     interaction: discord.Interaction,
@@ -257,28 +296,28 @@ async def artist_add(
     display_name: str | None = None,
     notes: str | None = None,
 ) -> None:
-    """Discord slash command로 아티스트와 X 계정을 등록합니다."""
+    """Discord slash command濡??꾪떚?ㅽ듃? X 怨꾩젙???깅줉?⑸땲??"""
     await interaction.response.defer(ephemeral=True)
     try:
         artist = _create_artist(str(interaction.user.id), name, x_username, display_name, notes)
     except Exception as exc:
-        logger.exception("아티스트 등록 명령 처리에 실패했습니다.")
-        await interaction.followup.send(f"아티스트 등록에 실패했습니다: {exc}", ephemeral=True)
+        logger.exception("?꾪떚?ㅽ듃 ?깅줉 紐낅졊 泥섎━???ㅽ뙣?덉뒿?덈떎.")
+        await interaction.followup.send(f"?꾪떚?ㅽ듃 ?깅줉???ㅽ뙣?덉뒿?덈떎: {exc}", ephemeral=True)
         return
 
     await interaction.followup.send(
-        f"아티스트 #{artist['id']} 등록 완료: {artist['name']} (@{_normalize_x_username(x_username)})",
+        f"?꾪떚?ㅽ듃 #{artist['id']} ?깅줉 ?꾨즺: {artist['name']} (@{_normalize_x_username(x_username)})",
         ephemeral=True,
     )
 
 
-@bot.tree.command(name="artist_list", description="등록된 아티스트 목록을 보여줍니다.")
+@bot.tree.command(name="artist_list", description="?깅줉???꾪떚?ㅽ듃 紐⑸줉??蹂댁뿬以띾땲??")
 async def artist_list(interaction: discord.Interaction) -> None:
-    """현재 Discord 사용자가 등록한 아티스트 목록을 보여줍니다."""
+    """?꾩옱 Discord ?ъ슜?먭? ?깅줉???꾪떚?ㅽ듃 紐⑸줉??蹂댁뿬以띾땲??"""
     await interaction.response.defer(ephemeral=True)
     artists = _list_artists(str(interaction.user.id))
     if not artists:
-        await interaction.followup.send("아직 등록된 아티스트가 없습니다.", ephemeral=True)
+        await interaction.followup.send("?꾩쭅 ?깅줉???꾪떚?ㅽ듃媛 ?놁뒿?덈떎.", ephemeral=True)
         return
 
     lines = []
@@ -291,47 +330,47 @@ async def artist_list(interaction: discord.Interaction) -> None:
     await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 
-@bot.tree.command(name="artist_delete", description="ID로 아티스트를 삭제합니다.")
-@app_commands.describe(artist_id="/artist_list에 표시된 아티스트 ID")
+@bot.tree.command(name="artist_delete", description="ID濡??꾪떚?ㅽ듃瑜???젣?⑸땲??")
+@app_commands.describe(artist_id="/artist_list???쒖떆???꾪떚?ㅽ듃 ID")
 async def artist_delete(interaction: discord.Interaction, artist_id: int) -> None:
-    """현재 Discord 사용자의 아티스트를 ID 기준으로 삭제합니다."""
+    """?꾩옱 Discord ?ъ슜?먯쓽 ?꾪떚?ㅽ듃瑜?ID 湲곗??쇰줈 ??젣?⑸땲??"""
     await interaction.response.defer(ephemeral=True)
     deleted = _delete_artist(str(interaction.user.id), artist_id)
     if deleted:
-        await interaction.followup.send(f"아티스트 #{artist_id}를 삭제했습니다.", ephemeral=True)
+        await interaction.followup.send(f"?꾪떚?ㅽ듃 #{artist_id}瑜???젣?덉뒿?덈떎.", ephemeral=True)
     else:
-        await interaction.followup.send(f"아티스트 #{artist_id}를 찾지 못했습니다.", ephemeral=True)
+        await interaction.followup.send(f"?꾪떚?ㅽ듃 #{artist_id}瑜?李얠? 紐삵뻽?듬땲??", ephemeral=True)
 
 
-@bot.tree.command(name="google_connect", description="Google Calendar를 연결합니다.")
+@bot.tree.command(name="google_connect", description="Google Calendar瑜??곌껐?⑸땲??")
 async def google_connect(interaction: discord.Interaction) -> None:
-    """현재 Discord 사용자에게 Google Calendar OAuth 연결 링크를 안내합니다."""
+    """?꾩옱 Discord ?ъ슜?먯뿉寃?Google Calendar OAuth ?곌껐 留곹겕瑜??덈궡?⑸땲??"""
     await interaction.response.defer(ephemeral=True)
     if google_connected(str(interaction.user.id)):
-        await interaction.followup.send("Google Calendar가 이미 연결되어 있습니다.", ephemeral=True)
+        await interaction.followup.send("Google Calendar媛 ?대? ?곌껐?섏뼱 ?덉뒿?덈떎.", ephemeral=True)
         return
     if not google_oauth_configured():
         await interaction.followup.send(
-            "서버에 Google OAuth 설정이 아직 없습니다.",
+            "?쒕쾭??Google OAuth ?ㅼ젙???꾩쭅 ?놁뒿?덈떎.",
             ephemeral=True,
         )
         return
 
     auth_url = build_google_auth_url(str(interaction.user.id))
     await interaction.followup.send(
-        f"아래 링크에서 Google Calendar를 연결하세요:\n{auth_url}",
+        f"?꾨옒 留곹겕?먯꽌 Google Calendar瑜??곌껐?섏꽭??\n{auth_url}",
         ephemeral=True,
     )
 
 
 @bot.tree.command(
     name="lyrics_caption_test",
-    description="YouTube URL의 수동 자막 추출을 테스트합니다.",
+    description="YouTube URL???섎룞 ?먮쭑 異붿텧???뚯뒪?명빀?덈떎.",
 )
 @app_commands.describe(
-    youtube_url="확인할 YouTube URL",
-    audio_fallback="수동 자막이 없을 때 허가된 짧은 오디오 fallback을 사용합니다.",
-    language_code="Whisper에 전달할 원문 언어 코드입니다. 예: ja, en, ko",
+    youtube_url="?뺤씤??YouTube URL",
+    audio_fallback="?섎룞 ?먮쭑???놁쓣 ???덇???吏㏃? ?ㅻ뵒??fallback???ъ슜?⑸땲??",
+    language_code="Whisper???꾨떖???먮Ц ?몄뼱 肄붾뱶?낅땲?? ?? ja, en, ko",
 )
 async def lyrics_caption_test(
     interaction: discord.Interaction,
@@ -371,7 +410,7 @@ async def lyrics_caption_test(
         try:
             translation_ko, pronunciation_ko = await _transform_caption_preview(raw)
         except Exception as exc:
-            logger.exception("가사 미리보기 변환에 실패했습니다.")
+            logger.exception("媛??誘몃━蹂닿린 蹂?섏뿉 ?ㅽ뙣?덉뒿?덈떎.")
             translation_ko, pronunciation_ko = None, None
             openai_error = str(exc)
         report_path = _caption_report_path(video_id, str(interaction.user.id))
@@ -387,46 +426,176 @@ async def lyrics_caption_test(
             encoding="utf-8",
         )
     except ValueError as exc:
-        await interaction.followup.send(f"올바르지 않은 YouTube URL입니다: {exc}", ephemeral=True)
+        await interaction.followup.send(f"?щ컮瑜댁? ?딆? YouTube URL?낅땲?? {exc}", ephemeral=True)
         return
     except (IpBlocked, RequestBlocked):
         await interaction.followup.send(
             (
-                "YouTube가 이 봇 서버 IP의 자막 요청을 차단했습니다.\n"
-                "클라우드 호스팅 IP이거나 요청이 많을 때 자주 발생합니다. "
-                "나중에 다시 시도하거나, 다른 네트워크에서 봇을 실행하거나, "
-                "youtube-transcript-api용 프록시를 설정하세요."
+                "YouTube媛 ??遊??쒕쾭 IP???먮쭑 ?붿껌??李⑤떒?덉뒿?덈떎.\n"
+                "?대씪?곕뱶 ?몄뒪??IP?닿굅???붿껌??留롮쓣 ???먯＜ 諛쒖깮?⑸땲?? "
+                "?섏쨷???ㅼ떆 ?쒕룄?섍굅?? ?ㅻⅨ ?ㅽ듃?뚰겕?먯꽌 遊뉗쓣 ?ㅽ뻾?섍굅?? "
+                "youtube-transcript-api???꾨줉?쒕? ?ㅼ젙?섏꽭??"
             ),
             ephemeral=True,
         )
         return
     except TranscriptsDisabled:
         await interaction.followup.send(
-            "이 영상은 youtube-transcript-api에서 접근 가능한 공개 자막을 제공하지 않습니다.",
+            "???곸긽? youtube-transcript-api?먯꽌 ?묎렐 媛?ν븳 怨듦컻 ?먮쭑???쒓났?섏? ?딆뒿?덈떎.",
             ephemeral=True,
         )
         return
     except LyricsPipelineError as exc:
-        await interaction.followup.send(f"사용 가능한 수동 자막이 없습니다: {exc}", ephemeral=True)
+        await interaction.followup.send(f"?ъ슜 媛?ν븳 ?섎룞 ?먮쭑???놁뒿?덈떎: {exc}", ephemeral=True)
         return
     except YouTubeTranscriptApiException as exc:
-        logger.exception("YouTube 자막 조회에 실패했습니다.")
+        logger.exception("YouTube ?먮쭑 議고쉶???ㅽ뙣?덉뒿?덈떎.")
         await interaction.followup.send(
-            f"YouTube 자막 조회에 실패했습니다: {type(exc).__name__}",
+            f"YouTube ?먮쭑 議고쉶???ㅽ뙣?덉뒿?덈떎: {type(exc).__name__}",
             ephemeral=True,
         )
         return
     except Exception as exc:
-        logger.exception("가사 자막 테스트 명령 처리에 실패했습니다.")
-        await interaction.followup.send(f"자막 테스트에 실패했습니다: {exc}", ephemeral=True)
+        logger.exception("媛???먮쭑 ?뚯뒪??紐낅졊 泥섎━???ㅽ뙣?덉뒿?덈떎.")
+        await interaction.followup.send(f"?먮쭑 ?뚯뒪?몄뿉 ?ㅽ뙣?덉뒿?덈떎: {exc}", ephemeral=True)
         return
 
     await interaction.followup.send(
         (
-            f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
-            f"검토 필요: `{raw.needs_review}` / 오디오 fallback: `{audio_fallback}`\n"
+            f"媛??異쒖쿂: `{raw.source_type}` / ?몄뼱: `{raw.language_code or language_code}`\n"
+            f"寃???꾩슂: `{raw.needs_review}` / ?ㅻ뵒??fallback: `{audio_fallback}`\n"
             f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
-            f"리포트 저장 경로: `{report_path}`"
+            f"由ы룷?????寃쎈줈: `{report_path}`"
+        ),
+        file=discord.File(report_path),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="lyrics_source_test",
+    description="YouTube URL?먯꽌 ?먮쭑, ?ㅻ챸?, ?곷떒 ?볤?, ?ㅻ뵒??fallback???좏깮???뚯뒪?명빀?덈떎.",
+)
+@app_commands.describe(
+    youtube_url="?뺤씤??YouTube URL",
+    description_fallback="?섎룞 ?먮쭑???놁쑝硫??곸긽 ?ㅻ챸??먯꽌 媛???꾨낫瑜?李얠뒿?덈떎.",
+    comment_fallback="?섎룞 ?먮쭑???놁쑝硫??곷떒 ?볤??먯꽌 媛???꾨낫瑜?李얠뒿?덈떎.",
+    audio_fallback="?ㅻⅨ ?뚯뒪媛 ?ㅽ뙣?섎㈃ 吏㏃? ?ㅻ뵒??fallback???ъ슜?⑸땲??",
+    language_code="?먮Ц ?몄뼱 肄붾뱶?낅땲?? ?? ja, en, ko",
+)
+async def lyrics_source_test(
+    interaction: discord.Interaction,
+    youtube_url: str,
+    description_fallback: bool = False,
+    comment_fallback: bool = False,
+    audio_fallback: bool = False,
+    language_code: str = "ja",
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    caption_client = YouTubeTranscriptCaptionClient()
+    pipeline = LyricsPipeline(
+        caption_client=caption_client,
+        ai_client=_NoopLyricsAiClient(),
+        audio_downloader=YtDlpAudioDownloader() if audio_fallback else None,
+        speech_to_text_client=(
+            OpenAiSpeechToTextClient(language=language_code.strip() or "ja")
+            if audio_fallback
+            else None
+        ),
+    )
+
+    try:
+        video_id = extract_youtube_video_id(youtube_url)
+        try:
+            tracks = await caption_client.list_tracks(video_id)
+        except YouTubeTranscriptApiException:
+            tracks = []
+
+        raw = None
+        try:
+            raw = await _fetch_context_lyrics_candidate(
+                video_id=video_id,
+                youtube_url=youtube_url,
+                use_description=True,
+                use_comment=False,
+                language_code=language_code.strip() or "ja",
+            )
+        except Exception:
+            logger.exception("YouTube 설명란에서 가사 후보를 찾는 데 실패했습니다.")
+
+        if raw is None:
+            try:
+                raw = await pipeline.get_raw_lyrics(
+                    LyricsInput(
+                        youtube_url=youtube_url,
+                        preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
+                        allow_audio_fallback=False,
+                    )
+                )
+            except Exception:
+                logger.exception("수동 자막 조회에 실패했거나 사용할 수 있는 수동 자막이 없습니다.")
+
+        if raw is None:
+            try:
+                raw = await _fetch_context_lyrics_candidate(
+                    video_id=video_id,
+                    youtube_url=youtube_url,
+                    use_description=False,
+                    use_comment=True,
+                    language_code=language_code.strip() or "ja",
+                )
+            except Exception:
+                logger.exception("YouTube 상단 댓글에서 가사 후보를 찾는 데 실패했습니다.")
+
+        if raw is None and audio_fallback:
+            raw = await pipeline.get_raw_lyrics(
+                LyricsInput(
+                    youtube_url=youtube_url,
+                    preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
+                    allow_audio_fallback=True,
+                )
+            )
+
+        if raw is None:
+            raise LyricsPipelineError("?좏깮???뚯뒪?먯꽌 媛???꾨낫瑜?李얠? 紐삵뻽?듬땲??")
+
+        openai_error = None
+        try:
+            translation_ko, pronunciation_ko = await _transform_caption_preview(raw)
+        except Exception as exc:
+            logger.exception("媛??誘몃━蹂닿린 蹂?섏뿉 ?ㅽ뙣?덉뒿?덈떎.")
+            translation_ko, pronunciation_ko = None, None
+            openai_error = str(exc)
+
+        report_path = _caption_report_path(video_id, str(interaction.user.id))
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            _caption_report(
+                youtube_url=youtube_url,
+                tracks=tracks,
+                raw=raw,
+                translation_ko=translation_ko,
+                pronunciation_ko=pronunciation_ko,
+            ),
+            encoding="utf-8",
+        )
+    except ValueError as exc:
+        await interaction.followup.send(f"?щ컮瑜댁? ?딆? YouTube URL?낅땲?? {exc}", ephemeral=True)
+        return
+    except LyricsPipelineError as exc:
+        await interaction.followup.send(f"媛???꾨낫瑜?李얠? 紐삵뻽?듬땲?? {exc}", ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("媛???뚯뒪 ?뚯뒪??紐낅졊 泥섎━???ㅽ뙣?덉뒿?덈떎.")
+        await interaction.followup.send(f"媛???뚯뒪 ?뚯뒪?몄뿉 ?ㅽ뙣?덉뒿?덈떎: {exc}", ephemeral=True)
+        return
+
+    await interaction.followup.send(
+        (
+            f"媛??異쒖쿂: `{raw.source_type}` / ?몄뼱: `{raw.language_code or language_code}`\n"
+            f"寃???꾩슂: `{raw.needs_review}`\n"
+            f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
+            f"由ы룷?????寃쎈줈: `{report_path}`"
         ),
         file=discord.File(report_path),
         ephemeral=True,
@@ -434,9 +603,9 @@ async def lyrics_caption_test(
 
 
 async def start_discord_bot() -> None:
-    """토큰이 설정되어 있으면 Discord 봇을 시작하고, 없으면 비활성 상태로 둡니다."""
+    """?좏겙???ㅼ젙?섏뼱 ?덉쑝硫?Discord 遊뉗쓣 ?쒖옉?섍퀬, ?놁쑝硫?鍮꾪솢???곹깭濡??〓땲??"""
     if not settings.discord_bot_token:
-        logger.warning("DISCORD_BOT_TOKEN이 설정되어 있지 않아 Discord 봇을 비활성화합니다.")
+        logger.warning("DISCORD_BOT_TOKEN???ㅼ젙?섏뼱 ?덉? ?딆븘 Discord 遊뉗쓣 鍮꾪솢?깊솕?⑸땲??")
         return
 
     await bot.start(settings.discord_bot_token)

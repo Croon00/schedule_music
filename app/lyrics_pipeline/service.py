@@ -165,6 +165,7 @@ class LyricsPipeline:
         return RawLyrics(
             text=text,
             source_type=LyricsSourceType.AUDIO_TRANSCRIPT,
+            language_code=payload.preferred_languages[0] if payload.preferred_languages else None,
             source_url=payload.youtube_url,
             needs_review=True,
         )
