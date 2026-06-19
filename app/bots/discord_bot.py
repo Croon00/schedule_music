@@ -6,6 +6,12 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
+from youtube_transcript_api._errors import (
+    IpBlocked,
+    RequestBlocked,
+    TranscriptsDisabled,
+    YouTubeTranscriptApiException,
+)
 
 from app.core.config import settings
 from app.core.db import get_connection, init_db, row_to_dict
@@ -351,8 +357,32 @@ async def lyrics_caption_test(interaction: discord.Interaction, youtube_url: str
     except ValueError as exc:
         await interaction.followup.send(f"Invalid YouTube URL: {exc}", ephemeral=True)
         return
+    except (IpBlocked, RequestBlocked):
+        await interaction.followup.send(
+            (
+                "YouTube blocked transcript requests from this bot server's IP.\n"
+                "This often happens on cloud hosting IPs or after too many requests. "
+                "Try again later, run the bot from a different network, or configure a proxy "
+                "for youtube-transcript-api."
+            ),
+            ephemeral=True,
+        )
+        return
+    except TranscriptsDisabled:
+        await interaction.followup.send(
+            "This video does not expose public transcripts to youtube-transcript-api.",
+            ephemeral=True,
+        )
+        return
     except LyricsPipelineError as exc:
         await interaction.followup.send(f"No manual caption available: {exc}", ephemeral=True)
+        return
+    except YouTubeTranscriptApiException as exc:
+        logger.exception("youtube transcript lookup failed")
+        await interaction.followup.send(
+            f"YouTube transcript lookup failed: {type(exc).__name__}",
+            ephemeral=True,
+        )
         return
     except Exception as exc:
         logger.exception("lyrics_caption_test failed")
