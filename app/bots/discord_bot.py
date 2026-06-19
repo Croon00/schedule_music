@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -12,13 +14,89 @@ from app.integrations.google_calendar import (
     google_connected,
     google_oauth_configured,
 )
+from app.lyrics_pipeline.clients import YouTubeTranscriptCaptionClient
+from app.lyrics_pipeline.models import LyricsInput, RawLyrics
+from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
+from app.lyrics_pipeline.youtube import extract_youtube_video_id
 
 logger = logging.getLogger(__name__)
+
+LYRICS_SAMPLE_MAX_CHARS = 1000
+LYRICS_SAMPLE_MAX_LINES = 1000
+LYRICS_EXPORT_DIR = Path("exports")
+
+
+class _NoopLyricsAiClient:
+    async def transform_lyrics(
+        self,
+        *,
+        lyrics: str,
+        artist: str | None,
+        title: str | None,
+    ) -> tuple[str, str]:
+        return "", ""
+
+    async def render_namuwiki(
+        self,
+        *,
+        original: str,
+        translation_ko: str,
+        pronunciation_ko: str,
+        format_example: str,
+        artist: str | None,
+        title: str | None,
+    ) -> str:
+        return format_example
 
 
 def _normalize_x_username(value: str) -> str:
     """Discord 입력값에서 앞쪽 @와 공백을 제거해 X username만 남깁니다."""
     return value.strip().lstrip("@")
+
+
+def _caption_sample(text: str) -> str:
+    lines: list[str] = []
+    used_chars = 0
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        remaining = LYRICS_SAMPLE_MAX_CHARS - used_chars
+        if remaining <= 0 or len(lines) >= LYRICS_SAMPLE_MAX_LINES:
+            break
+        if len(line) > remaining:
+            line = line[:remaining].rstrip()
+        lines.append(line)
+        used_chars += len(line)
+    return "\n".join(lines)
+
+
+def _caption_report(
+    *,
+    youtube_url: str,
+    tracks: list,
+    raw: RawLyrics,
+) -> str:
+    raw_lines = [line for line in raw.text.splitlines() if line.strip()]
+    track_lines = [
+        f"- {track.language_code} {track.language_name} generated={track.is_generated}"
+        for track in tracks
+    ]
+    return (
+        f"URL: {youtube_url}\n"
+        f"Selected Source: {raw.source_type}\n"
+        f"Selected Language: {raw.language_code}\n"
+        f"Needs Review: {raw.needs_review}\n"
+        f"Original Caption Length: {len(raw.text)} chars / {len(raw_lines)} lines\n\n"
+        "Available Captions\n"
+        f"{chr(10).join(track_lines)}\n\n"
+        "## Original Sample\n\n"
+        f"{_caption_sample(raw.text)}\n"
+    )
+
+
+def _caption_report_path(video_id: str, discord_user_id: str) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    return LYRICS_EXPORT_DIR / f"{video_id}_{discord_user_id}_{timestamp}_caption_report.txt"
 
 
 def _create_artist(
@@ -192,6 +270,51 @@ async def google_connect(interaction: discord.Interaction) -> None:
     auth_url = build_google_auth_url(str(interaction.user.id))
     await interaction.followup.send(
         f"Connect Google Calendar here:\n{auth_url}",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="lyrics_caption_test",
+    description="Test manual YouTube caption extraction for a URL.",
+)
+@app_commands.describe(youtube_url="YouTube URL to inspect")
+async def lyrics_caption_test(interaction: discord.Interaction, youtube_url: str) -> None:
+    await interaction.response.defer(ephemeral=True)
+    caption_client = YouTubeTranscriptCaptionClient()
+    pipeline = LyricsPipeline(
+        caption_client=caption_client,
+        ai_client=_NoopLyricsAiClient(),
+    )
+
+    try:
+        video_id = extract_youtube_video_id(youtube_url)
+        tracks = await caption_client.list_tracks(video_id)
+        raw = await pipeline.get_raw_lyrics(LyricsInput(youtube_url=youtube_url))
+        report_path = _caption_report_path(video_id, str(interaction.user.id))
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            _caption_report(youtube_url=youtube_url, tracks=tracks, raw=raw),
+            encoding="utf-8",
+        )
+    except ValueError as exc:
+        await interaction.followup.send(f"Invalid YouTube URL: {exc}", ephemeral=True)
+        return
+    except LyricsPipelineError as exc:
+        await interaction.followup.send(f"No manual caption available: {exc}", ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("lyrics_caption_test failed")
+        await interaction.followup.send(f"Caption test failed: {exc}", ephemeral=True)
+        return
+
+    await interaction.followup.send(
+        (
+            f"Manual caption found: `{raw.language_code}`\n"
+            f"Source: `{raw.source_type}` / Needs review: `{raw.needs_review}`\n"
+            f"Saved report: `{report_path}`"
+        ),
+        file=discord.File(report_path),
         ephemeral=True,
     )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.lyrics_pipeline.clients import (
     AudioDownloader,
     CaptionClient,
@@ -83,6 +85,41 @@ class LyricsPipeline:
             needs_review=transformed.needs_review,
         )
 
+    async def save_transform(
+        self,
+        *,
+        payload: LyricsInput,
+        output_path: str | Path,
+    ) -> Path:
+        transformed = await self.transform(payload)
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            self._format_transform_for_file(payload, transformed),
+            encoding="utf-8",
+        )
+        return path
+
+    def _format_transform_for_file(
+        self,
+        payload: LyricsInput,
+        transformed: LyricsTransform,
+    ) -> str:
+        metadata = [
+            f"Title: {payload.title or ''}",
+            f"Artist: {payload.artist or ''}",
+            f"YouTube URL: {payload.youtube_url}",
+            f"Source: {transformed.source_type}",
+            f"Needs Review: {transformed.needs_review}",
+        ]
+        sections = [
+            "\n".join(metadata).rstrip(),
+            "## Original\n\n" + transformed.original.strip(),
+            "## Korean Translation\n\n" + transformed.translation_ko.strip(),
+            "## Korean Pronunciation\n\n" + transformed.pronunciation_ko.strip(),
+        ]
+        return "\n\n".join(sections).rstrip() + "\n"
+
     async def _fetch_best_caption(
         self,
         video_id: str,
@@ -122,4 +159,3 @@ class LyricsPipeline:
             source_url=payload.youtube_url,
             needs_review=True,
         )
-

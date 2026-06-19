@@ -58,7 +58,7 @@ class YouTubeTranscriptCaptionClient:
     async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
         from youtube_transcript_api import YouTubeTranscriptApi
 
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id)
         tracks: list[CaptionTrack] = []
         for transcript in transcript_list:
             tracks.append(
@@ -75,7 +75,6 @@ class YouTubeTranscriptCaptionClient:
 
         from app.lyrics_pipeline.youtube import normalize_caption_text
 
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id)
         transcript = transcript_list.find_transcript([language_code])
-        return normalize_caption_text(transcript.fetch())
-
+        return normalize_caption_text(transcript.fetch().to_raw_data())
