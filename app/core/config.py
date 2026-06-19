@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-mini"
     openai_audio_model: str = "whisper-1"
     lyrics_audio_fallback_max_seconds: int = 500
+    youtube_transcript_proxy_http_url: str | None = None
+    youtube_transcript_proxy_https_url: str | None = None
+    webshare_proxy_username: str | None = None
+    webshare_proxy_password: str | None = None
+    webshare_proxy_locations: str | None = None
+    ytdlp_proxy_url: str | None = None
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
@@ -29,6 +35,12 @@ class Settings(BaseSettings):
         "public_base_url",
         "x_bearer_token",
         "openai_api_key",
+        "youtube_transcript_proxy_http_url",
+        "youtube_transcript_proxy_https_url",
+        "webshare_proxy_username",
+        "webshare_proxy_password",
+        "webshare_proxy_locations",
+        "ytdlp_proxy_url",
         "google_client_id",
         "google_client_secret",
         "google_redirect_uri",

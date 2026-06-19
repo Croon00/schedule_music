@@ -28,6 +28,50 @@ LYRICS_TRANSFORM_SCHEMA = {
 }
 
 
+def _split_proxy_locations(value: str | None) -> list[str] | None:
+    if not value:
+        return None
+    locations = [item.strip().lower() for item in value.split(",") if item.strip()]
+    return locations or None
+
+
+def _build_transcript_proxy_config():
+    if settings.webshare_proxy_username and settings.webshare_proxy_password:
+        from youtube_transcript_api.proxies import WebshareProxyConfig
+
+        return WebshareProxyConfig(
+            proxy_username=settings.webshare_proxy_username,
+            proxy_password=settings.webshare_proxy_password,
+            filter_ip_locations=_split_proxy_locations(settings.webshare_proxy_locations),
+        )
+
+    if settings.youtube_transcript_proxy_http_url or settings.youtube_transcript_proxy_https_url:
+        from youtube_transcript_api.proxies import GenericProxyConfig
+
+        return GenericProxyConfig(
+            http_url=settings.youtube_transcript_proxy_http_url,
+            https_url=settings.youtube_transcript_proxy_https_url,
+        )
+
+    return None
+
+
+def _build_ytdlp_proxy_url() -> str | None:
+    if settings.ytdlp_proxy_url:
+        return settings.ytdlp_proxy_url
+    if settings.youtube_transcript_proxy_https_url:
+        return settings.youtube_transcript_proxy_https_url
+    if settings.youtube_transcript_proxy_http_url:
+        return settings.youtube_transcript_proxy_http_url
+    if settings.webshare_proxy_username and settings.webshare_proxy_password:
+        return (
+            "http://"
+            f"{settings.webshare_proxy_username}:{settings.webshare_proxy_password}"
+            "@p.webshare.io:80"
+        )
+    return None
+
+
 class CaptionClient(Protocol):
     async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
         """YouTube 영상의 공개 자막 트랙 목록을 반환합니다."""
@@ -72,10 +116,15 @@ class LyricsAiClient(Protocol):
 class YouTubeTranscriptCaptionClient:
     """youtube-transcript-api를 사용하는 YouTube 자막 클라이언트입니다."""
 
+    def _api(self):
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        return YouTubeTranscriptApi(proxy_config=_build_transcript_proxy_config())
+
     async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
         from youtube_transcript_api import YouTubeTranscriptApi
 
-        transcript_list = YouTubeTranscriptApi().list(video_id)
+        transcript_list = self._api().list(video_id)
         tracks: list[CaptionTrack] = []
         for transcript in transcript_list:
             tracks.append(
@@ -92,7 +141,7 @@ class YouTubeTranscriptCaptionClient:
 
         from app.lyrics_pipeline.youtube import normalize_caption_text
 
-        transcript_list = YouTubeTranscriptApi().list(video_id)
+        transcript_list = self._api().list(video_id)
         transcript = transcript_list.find_transcript([language_code])
         return normalize_caption_text(transcript.fetch().to_raw_data())
 
@@ -128,6 +177,9 @@ class YtDlpAudioDownloader:
             "-o",
             output_template,
         ]
+        proxy_url = _build_ytdlp_proxy_url()
+        if proxy_url:
+            command.extend(["--proxy", proxy_url])
         if self.max_seconds > 0:
             command.extend(
                 [
