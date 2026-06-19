@@ -14,7 +14,7 @@ from app.integrations.google_calendar import (
     google_connected,
     google_oauth_configured,
 )
-from app.lyrics_pipeline.clients import YouTubeTranscriptCaptionClient
+from app.lyrics_pipeline.clients import OpenAiLyricsClient, YouTubeTranscriptCaptionClient
 from app.lyrics_pipeline.models import LyricsInput, RawLyrics
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
@@ -75,23 +75,61 @@ def _caption_report(
     youtube_url: str,
     tracks: list,
     raw: RawLyrics,
+    translation_ko: str | None = None,
+    pronunciation_ko: str | None = None,
 ) -> str:
     raw_lines = [line for line in raw.text.splitlines() if line.strip()]
     track_lines = [
         f"- {track.language_code} {track.language_name} generated={track.is_generated}"
         for track in tracks
     ]
-    return (
-        f"URL: {youtube_url}\n"
-        f"Selected Source: {raw.source_type}\n"
-        f"Selected Language: {raw.language_code}\n"
-        f"Needs Review: {raw.needs_review}\n"
-        f"Original Caption Length: {len(raw.text)} chars / {len(raw_lines)} lines\n\n"
-        "Available Captions\n"
-        f"{chr(10).join(track_lines)}\n\n"
-        "## Original Sample\n\n"
-        f"{_caption_sample(raw.text)}\n"
+    sections = [
+        f"URL: {youtube_url}",
+        f"Selected Source: {raw.source_type}",
+        f"Selected Language: {raw.language_code}",
+        f"Needs Review: {raw.needs_review}",
+        f"Original Caption Length: {len(raw.text)} chars / {len(raw_lines)} lines",
+        "",
+        "Available Captions",
+        chr(10).join(track_lines),
+        "",
+        "## Original Preview",
+        "",
+        _caption_sample(raw.text),
+    ]
+    if translation_ko is not None:
+        sections.extend(["", "## Korean Translation Preview", "", translation_ko])
+    if pronunciation_ko is not None:
+        sections.extend(["", "## Korean Pronunciation Preview", "", pronunciation_ko])
+    return "\n".join(sections).rstrip() + "\n"
+
+
+async def _transform_caption_preview(raw: RawLyrics) -> tuple[str | None, str | None]:
+    if not settings.openai_api_key:
+        return None, None
+
+    preview = _caption_sample(raw.text)
+    if not preview:
+        return None, None
+
+    ai_client = OpenAiLyricsClient()
+    return await ai_client.transform_lyrics(
+        lyrics=preview,
+        artist=None,
+        title=None,
     )
+
+
+def _openai_status_text(
+    translation_ko: str | None,
+    pronunciation_ko: str | None,
+    error: str | None = None,
+) -> str:
+    if error:
+        return f"OpenAI preview transform: `failed ({error})`"
+    if translation_ko is None and pronunciation_ko is None:
+        return "OpenAI preview transform: `skipped (OPENAI_API_KEY not configured)`"
+    return "OpenAI preview transform: `done`"
 
 
 def _caption_report_path(video_id: str, discord_user_id: str) -> Path:
@@ -291,10 +329,23 @@ async def lyrics_caption_test(interaction: discord.Interaction, youtube_url: str
         video_id = extract_youtube_video_id(youtube_url)
         tracks = await caption_client.list_tracks(video_id)
         raw = await pipeline.get_raw_lyrics(LyricsInput(youtube_url=youtube_url))
+        openai_error = None
+        try:
+            translation_ko, pronunciation_ko = await _transform_caption_preview(raw)
+        except Exception as exc:
+            logger.exception("lyrics preview transform failed")
+            translation_ko, pronunciation_ko = None, None
+            openai_error = str(exc)
         report_path = _caption_report_path(video_id, str(interaction.user.id))
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
-            _caption_report(youtube_url=youtube_url, tracks=tracks, raw=raw),
+            _caption_report(
+                youtube_url=youtube_url,
+                tracks=tracks,
+                raw=raw,
+                translation_ko=translation_ko,
+                pronunciation_ko=pronunciation_ko,
+            ),
             encoding="utf-8",
         )
     except ValueError as exc:
@@ -312,6 +363,7 @@ async def lyrics_caption_test(interaction: discord.Interaction, youtube_url: str
         (
             f"Manual caption found: `{raw.language_code}`\n"
             f"Source: `{raw.source_type}` / Needs review: `{raw.needs_review}`\n"
+            f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
             f"Saved report: `{report_path}`"
         ),
         file=discord.File(report_path),
