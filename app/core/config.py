@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     openai_audio_model: str = "whisper-1"
-    lyrics_audio_fallback_max_seconds: int = 30
+    lyrics_audio_fallback_max_seconds: int = 500
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
