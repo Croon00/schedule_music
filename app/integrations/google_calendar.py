@@ -38,7 +38,7 @@ def build_google_auth_url(discord_user_id: str) -> str:
     """Discord 사용자 ID를 state에 담은 Google Calendar 권한 요청 URL을 만듭니다."""
     redirect_uri = get_google_redirect_uri()
     if not settings.google_client_id or not redirect_uri:
-        raise RuntimeError("Google OAuth is not configured.")
+        raise RuntimeError("Google OAuth가 설정되어 있지 않습니다.")
 
     params = {
         "client_id": settings.google_client_id,
@@ -56,7 +56,7 @@ async def exchange_code_for_tokens(code: str, discord_user_id: str) -> None:
     """Google callback으로 받은 code를 access/refresh token으로 교환해 DB에 저장합니다."""
     redirect_uri = get_google_redirect_uri()
     if not settings.google_client_id or not settings.google_client_secret or not redirect_uri:
-        raise RuntimeError("Google OAuth is not configured.")
+        raise RuntimeError("Google OAuth가 설정되어 있지 않습니다.")
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -79,9 +79,9 @@ async def refresh_google_token(discord_user_id: str, token: dict[str, Any]) -> d
     """만료가 가까운 Google access token을 refresh token으로 갱신합니다."""
     refresh_token = token.get("refresh_token")
     if not refresh_token:
-        raise RuntimeError("Google refresh token is missing.")
+        raise RuntimeError("Google refresh token이 없습니다.")
     if not settings.google_client_id or not settings.google_client_secret:
-        raise RuntimeError("Google OAuth is not configured.")
+        raise RuntimeError("Google OAuth가 설정되어 있지 않습니다.")
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -123,7 +123,7 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
     """일정 후보 정보를 Google Calendar event로 생성하고 Google event id를 반환합니다."""
     token = get_google_token(discord_user_id)
     if not token:
-        raise RuntimeError("Google Calendar is not connected.")
+        raise RuntimeError("Google Calendar가 연결되어 있지 않습니다.")
 
     expires_at = token.get("expires_at")
     if expires_at and expires_at <= datetime.now(UTC) + timedelta(minutes=2):
@@ -145,7 +145,7 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
 
 
 async def create_calendar_events(discord_user_id: str, event: dict[str, Any]) -> dict[str, str]:
-    """Create separate calendar entries for live dates and ticket/application dates."""
+    """공연 날짜와 티켓/응모 날짜를 별도 Calendar 일정으로 생성합니다."""
     created = {}
     if event.get("starts_at"):
         created["live"] = await _create_calendar_event_from_payload(
@@ -168,7 +168,7 @@ async def create_calendar_events(discord_user_id: str, event: dict[str, Any]) ->
 async def _create_calendar_event_from_payload(discord_user_id: str, payload: dict[str, Any]) -> str:
     token = get_google_token(discord_user_id)
     if not token:
-        raise RuntimeError("Google Calendar is not connected.")
+        raise RuntimeError("Google Calendar가 연결되어 있지 않습니다.")
 
     expires_at = token.get("expires_at")
     if expires_at and expires_at <= datetime.now(UTC) + timedelta(minutes=2):
@@ -283,9 +283,9 @@ def _to_ticket_google_event(event: dict[str, Any]) -> dict[str, Any]:
 def _build_description(event: dict[str, Any]) -> str:
     description_parts = []
     if event.get("source_url"):
-        description_parts.append(f"Source: {event['source_url']}")
+        description_parts.append(f"출처: {event['source_url']}")
     if event.get("ticket_url"):
-        description_parts.append(f"Ticket: {event['ticket_url']}")
+        description_parts.append(f"티켓: {event['ticket_url']}")
     if event.get("price_text"):
         description_parts.append(f"티켓 정보:\n{event['price_text']}")
     if event.get("raw_text"):

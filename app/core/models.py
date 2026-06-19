@@ -16,7 +16,7 @@ class ArtistCreate(BaseModel):
     notes: str | None = None
     x_username: str | None = Field(
         default=None,
-        description="Optional X handle. Accepts '@artist' or 'artist'.",
+        description="선택 X 핸들입니다. '@artist' 또는 'artist' 형식을 모두 허용합니다.",
     )
 
     @field_validator("x_username")

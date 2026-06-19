@@ -18,7 +18,7 @@ def x_configured() -> bool:
 async def get_x_user_id(username: str) -> str:
     """X username을 X API 내부 user id로 변환합니다."""
     if not settings.x_bearer_token:
-        raise RuntimeError("X_BEARER_TOKEN is not configured.")
+        raise RuntimeError("X_BEARER_TOKEN이 설정되어 있지 않습니다.")
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(
@@ -33,7 +33,7 @@ async def get_x_user_id(username: str) -> str:
 async def fetch_recent_posts(user_id: str, since_id: str | None = None) -> list[dict[str, Any]]:
     """특정 X user id의 최신 원본 게시물을 가져오고, since_id 이후만 조회할 수 있습니다."""
     if not settings.x_bearer_token:
-        raise RuntimeError("X_BEARER_TOKEN is not configured.")
+        raise RuntimeError("X_BEARER_TOKEN이 설정되어 있지 않습니다.")
 
     params = {
         "max_results": "3",

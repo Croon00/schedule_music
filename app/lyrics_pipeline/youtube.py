@@ -10,7 +10,7 @@ YOUTUBE_ID_RE = re.compile(
 
 
 def extract_youtube_video_id(url: str) -> str:
-    """Return the 11-character YouTube video id from common URL formats."""
+    """일반적인 YouTube URL 형식에서 11자리 영상 ID를 반환합니다."""
     match = YOUTUBE_ID_RE.search(url)
     if match:
         return match.group("id")
@@ -18,11 +18,11 @@ def extract_youtube_video_id(url: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_-]{11}", url.strip()):
         return url.strip()
 
-    raise ValueError("Unsupported YouTube URL or video id.")
+    raise ValueError("지원하지 않는 YouTube URL 또는 영상 ID입니다.")
 
 
 def normalize_caption_text(chunks: list[dict]) -> str:
-    """Convert transcript chunks into compact line-oriented lyrics text."""
+    """자막 조각을 줄 단위의 간결한 가사 텍스트로 변환합니다."""
     lines: list[str] = []
     for chunk in chunks:
         text = str(chunk.get("text") or "").strip()

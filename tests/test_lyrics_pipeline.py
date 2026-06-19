@@ -28,6 +28,14 @@ class FakeCaptionClient:
         return self.captions.get(language_code)
 
 
+class FailingCaptionClient:
+    async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
+        raise RuntimeError("자막 조회 실패")
+
+    async def fetch_track(self, video_id: str, language_code: str) -> str | None:
+        raise RuntimeError("자막 조회 실패")
+
+
 class FakeAudioDownloader:
     def __init__(self) -> None:
         self.called = False
@@ -137,6 +145,29 @@ async def test_pipeline_falls_back_to_audio_when_no_manual_caption() -> None:
 
 
 @pytest.mark.anyio
+async def test_pipeline_falls_back_to_audio_when_caption_lookup_fails() -> None:
+    downloader = FakeAudioDownloader()
+    pipeline = LyricsPipeline(
+        caption_client=FailingCaptionClient(),
+        ai_client=FakeAiClient(),
+        audio_downloader=downloader,
+        speech_to_text_client=FakeSpeechToTextClient(),
+    )
+
+    result = await pipeline.transform(
+        LyricsInput(
+            youtube_url="https://www.youtube.com/watch?v=abcdefghijk",
+            allow_audio_fallback=True,
+        )
+    )
+
+    assert downloader.called is True
+    assert result.original == "transcribed lyrics"
+    assert result.source_type == LyricsSourceType.AUDIO_TRANSCRIPT
+    assert result.needs_review is True
+
+
+@pytest.mark.anyio
 async def test_pipeline_errors_without_caption_or_audio_fallback() -> None:
     pipeline = LyricsPipeline(
         caption_client=FakeCaptionClient(tracks=[], captions={}),
@@ -195,8 +226,8 @@ async def test_pipeline_saves_transformed_lyrics(tmp_path: Path) -> None:
 
     assert saved_path == output_path
     text = output_path.read_text(encoding="utf-8")
-    assert "Title: Title" in text
-    assert "Artist: Artist" in text
-    assert "## Original\n\nlyrics" in text
-    assert "## Korean Translation\n\ntranslated: lyrics" in text
-    assert "## Korean Pronunciation\n\npronounced: lyrics" in text
+    assert "제목: Title" in text
+    assert "아티스트: Artist" in text
+    assert "## 원문\n\nlyrics" in text
+    assert "## 한국어 번역\n\ntranslated: lyrics" in text
+    assert "## 한글 발음\n\npronounced: lyrics" in text

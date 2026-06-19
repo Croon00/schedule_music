@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+import sys
+import uuid
 from typing import Protocol
 
 from openai import AsyncOpenAI
@@ -27,20 +30,20 @@ LYRICS_TRANSFORM_SCHEMA = {
 
 class CaptionClient(Protocol):
     async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
-        """Return public caption tracks for a YouTube video."""
+        """YouTube 영상의 공개 자막 트랙 목록을 반환합니다."""
 
     async def fetch_track(self, video_id: str, language_code: str) -> str | None:
-        """Return caption text for a language, or None when unavailable."""
+        """지정한 언어의 자막 텍스트를 반환하고, 없으면 None을 반환합니다."""
 
 
 class AudioDownloader(Protocol):
     async def download_audio(self, youtube_url: str) -> Path:
-        """Download/extract audio and return a local file path."""
+        """오디오를 내려받거나 추출한 뒤 로컬 파일 경로를 반환합니다."""
 
 
 class SpeechToTextClient(Protocol):
     async def transcribe(self, audio_path: Path) -> str:
-        """Transcribe a local audio file."""
+        """로컬 오디오 파일을 텍스트로 전사합니다."""
 
 
 class LyricsAiClient(Protocol):
@@ -51,7 +54,7 @@ class LyricsAiClient(Protocol):
         artist: str | None,
         title: str | None,
     ) -> tuple[str, str]:
-        """Return Korean translation and Korean pronunciation."""
+        """한국어 번역과 한글 발음을 반환합니다."""
 
     async def render_namuwiki(
         self,
@@ -63,16 +66,11 @@ class LyricsAiClient(Protocol):
         artist: str | None,
         title: str | None,
     ) -> str:
-        """Return NamuWiki markup."""
+        """나무위키 문법 문자열을 반환합니다."""
 
 
 class YouTubeTranscriptCaptionClient:
-    """Caption client backed by youtube-transcript-api.
-
-    This dependency is intentionally optional so unit tests do not need network
-    access or the package installed. Add youtube-transcript-api before using it
-    in production.
-    """
+    """youtube-transcript-api를 사용하는 YouTube 자막 클라이언트입니다."""
 
     async def list_tracks(self, video_id: str) -> list[CaptionTrack]:
         from youtube_transcript_api import YouTubeTranscriptApi
@@ -99,8 +97,97 @@ class YouTubeTranscriptCaptionClient:
         return normalize_caption_text(transcript.fetch().to_raw_data())
 
 
+class YtDlpAudioDownloader:
+    """허가된 fallback 전사를 위해 yt-dlp로 짧은 오디오 구간을 내려받습니다."""
+
+    def __init__(
+        self,
+        *,
+        output_dir: str | Path = "exports/audio",
+        max_seconds: int | None = None,
+    ) -> None:
+        self.output_dir = Path(output_dir)
+        self.max_seconds = max_seconds or settings.lyrics_audio_fallback_max_seconds
+
+    async def download_audio(self, youtube_url: str) -> Path:
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        stem = f"audio_{uuid.uuid4().hex}"
+        output_template = str(self.output_dir / f"{stem}.%(ext)s")
+        command = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--no-playlist",
+            "--quiet",
+            "--no-warnings",
+            "-f",
+            "bestaudio/best",
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "-o",
+            output_template,
+        ]
+        if self.max_seconds > 0:
+            command.extend(
+                [
+                    "--download-sections",
+                    f"*0-{self.max_seconds}",
+                    "--force-keyframes-at-cuts",
+                ]
+            )
+        command.append(youtube_url)
+
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            error = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                "오디오 다운로드에 실패했습니다. yt-dlp와 ffmpeg가 사용 가능한지 확인하세요. "
+                f"{error}"
+            )
+
+        matches = sorted(self.output_dir.glob(f"{stem}.*"))
+        if not matches:
+            raise RuntimeError("오디오 다운로드는 끝났지만 출력 파일이 생성되지 않았습니다.")
+        return matches[0]
+
+
+class OpenAiSpeechToTextClient:
+    """OpenAI 오디오 전사 API를 사용하는 음성-텍스트 클라이언트입니다."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        language: str | None = None,
+    ) -> None:
+        self.api_key = api_key or settings.openai_api_key
+        self.model = model or settings.openai_audio_model
+        self.language = language
+
+    async def transcribe(self, audio_path: Path) -> str:
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
+
+        client = AsyncOpenAI(api_key=self.api_key)
+        with audio_path.open("rb") as audio_file:
+            response = await client.audio.transcriptions.create(
+                file=audio_file,
+                model=self.model,
+                language=self.language or "ja",
+                response_format="text",
+            )
+        return str(response)
+
+
 class OpenAiLyricsClient:
-    """Lyrics transformer backed by the OpenAI Chat Completions API."""
+    """OpenAI Chat Completions API를 사용하는 가사 변환 클라이언트입니다."""
 
     def __init__(
         self,
@@ -119,7 +206,7 @@ class OpenAiLyricsClient:
         title: str | None,
     ) -> tuple[str, str]:
         if not self.api_key:
-            raise RuntimeError("OPENAI_API_KEY is not configured.")
+            raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
 
         client = AsyncOpenAI(api_key=self.api_key)
         response = await client.chat.completions.create(
@@ -128,18 +215,17 @@ class OpenAiLyricsClient:
                 {
                     "role": "system",
                     "content": (
-                        "Translate the provided short lyric excerpt into natural Korean "
-                        "and provide Korean hangul pronunciation for the original. "
-                        "Keep line breaks aligned with the input where practical. "
-                        "Return only JSON fields that match the schema."
+                        "제공된 짧은 가사 발췌문을 자연스러운 한국어로 번역하고, "
+                        "원문의 한글식 발음을 제공하세요. 가능하면 입력 줄바꿈과 "
+                        "출력 줄바꿈을 맞추세요. 스키마와 일치하는 JSON 필드만 반환하세요."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Artist: {artist or '(unknown)'}\n"
-                        f"Title: {title or '(unknown)'}\n\n"
-                        f"Lyrics excerpt:\n{lyrics}"
+                        f"아티스트: {artist or '(알 수 없음)'}\n"
+                        f"제목: {title or '(알 수 없음)'}\n\n"
+                        f"가사 발췌:\n{lyrics}"
                     ),
                 },
             ],
@@ -163,7 +249,7 @@ class OpenAiLyricsClient:
         title: str | None,
     ) -> str:
         if not self.api_key:
-            raise RuntimeError("OPENAI_API_KEY is not configured.")
+            raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
 
         client = AsyncOpenAI(api_key=self.api_key)
         response = await client.chat.completions.create(
@@ -172,20 +258,19 @@ class OpenAiLyricsClient:
                 {
                     "role": "system",
                     "content": (
-                        "Render the supplied lyric excerpt, Korean translation, and "
-                        "Korean pronunciation using the user's NamuWiki format example. "
-                        "Do not add unrelated commentary."
+                        "제공된 가사 발췌문, 한국어 번역, 한글 발음을 사용자의 "
+                        "나무위키 형식 예시에 맞춰 작성하세요. 관련 없는 설명은 추가하지 마세요."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Artist: {artist or '(unknown)'}\n"
-                        f"Title: {title or '(unknown)'}\n\n"
-                        f"Format example:\n{format_example}\n\n"
-                        f"Original:\n{original}\n\n"
-                        f"Korean translation:\n{translation_ko}\n\n"
-                        f"Korean pronunciation:\n{pronunciation_ko}"
+                        f"아티스트: {artist or '(알 수 없음)'}\n"
+                        f"제목: {title or '(알 수 없음)'}\n\n"
+                        f"형식 예시:\n{format_example}\n\n"
+                        f"원문:\n{original}\n\n"
+                        f"한국어 번역:\n{translation_ko}\n\n"
+                        f"한글 발음:\n{pronunciation_ko}"
                     ),
                 },
             ],

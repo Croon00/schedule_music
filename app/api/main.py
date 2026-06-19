@@ -45,7 +45,7 @@ def health() -> dict[str, str]:
 def start_google_auth(discord_user_id: str) -> RedirectResponse:
     """Discord 사용자 ID를 state로 담아 Google OAuth 로그인 화면으로 이동시킵니다."""
     if not google_oauth_configured():
-        raise HTTPException(status_code=500, detail="Google OAuth is not configured.")
+        raise HTTPException(status_code=500, detail="Google OAuth가 설정되어 있지 않습니다.")
     return RedirectResponse(build_google_auth_url(discord_user_id))
 
 
@@ -56,8 +56,8 @@ async def google_auth_callback(code: str, state: str) -> str:
     return """
     <html>
       <body>
-        <h1>Google Calendar connected</h1>
-        <p>You can close this page and return to Discord.</p>
+        <h1>Google Calendar 연결 완료</h1>
+        <p>이 페이지를 닫고 Discord로 돌아가도 됩니다.</p>
       </body>
     </html>
     """
@@ -110,7 +110,7 @@ def update_artist(artist_id: int, payload: ArtistUpdate) -> dict:
     """아티스트의 이름, 표시 이름, 메모를 부분 수정합니다."""
     fields = payload.model_dump(exclude_unset=True)
     if not fields:
-        raise HTTPException(status_code=400, detail="No fields to update.")
+        raise HTTPException(status_code=400, detail="수정할 필드가 없습니다.")
 
     assignments = ", ".join(f"{field} = %s" for field in fields)
     values = list(fields.values())
@@ -168,7 +168,7 @@ def add_artist_source(artist_id: int, payload: SourceCreate) -> dict:
             conn.commit()
         except errors.UniqueViolation as exc:
             conn.rollback()
-            raise HTTPException(status_code=409, detail="Source already exists.") from exc
+            raise HTTPException(status_code=409, detail="이미 등록된 출처입니다.") from exc
 
         row = conn.execute(
             "SELECT * FROM artist_sources WHERE id = %s",
@@ -203,7 +203,7 @@ def delete_artist_source(artist_id: int, source_id: int) -> Response:
             (source_id, artist_id),
         )
         if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Source not found.")
+            raise HTTPException(status_code=404, detail="출처를 찾지 못했습니다.")
         conn.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -270,7 +270,7 @@ def _ensure_artist_exists(conn: Connection, artist_id: int) -> None:
     """아티스트가 실제로 존재하는지 확인하고 없으면 404 에러를 발생시킵니다."""
     row = conn.execute("SELECT id FROM artists WHERE id = %s", (artist_id,)).fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="Artist not found.")
+        raise HTTPException(status_code=404, detail="아티스트를 찾지 못했습니다.")
 
 
 def _get_artist_with_sources(conn: Connection, artist_id: int) -> dict:
@@ -279,7 +279,7 @@ def _get_artist_with_sources(conn: Connection, artist_id: int) -> dict:
         conn.execute("SELECT * FROM artists WHERE id = %s", (artist_id,)).fetchone()
     )
     if artist is None:
-        raise HTTPException(status_code=404, detail="Artist not found.")
+        raise HTTPException(status_code=404, detail="아티스트를 찾지 못했습니다.")
 
     sources = conn.execute(
         """
@@ -297,5 +297,5 @@ def _source_row_to_dict(row: dict | None) -> dict:
     """DB에서 읽은 출처 row를 API 응답용 dict로 변환합니다."""
     source = row_to_dict(row)
     if source is None:
-        raise HTTPException(status_code=404, detail="Source not found.")
+        raise HTTPException(status_code=404, detail="출처를 찾지 못했습니다.")
     return source

@@ -57,7 +57,7 @@ async def run_agent_once() -> dict[str, int]:
             for key, value in source_result.items():
                 result[key] += value
         except Exception:
-            logger.exception("agent failed for source %s", source["id"])
+            logger.exception("출처 %s 처리 중 에이전트가 실패했습니다.", source["id"])
 
     return result
 
@@ -296,8 +296,8 @@ async def agent_loop() -> None:
     while True:
         try:
             result = await run_agent_once()
-            logger.info("agent run completed: %s", result)
+            logger.info("에이전트 실행 완료: %s", result)
         except Exception:
-            logger.exception("agent run failed")
+            logger.exception("에이전트 실행에 실패했습니다.")
 
         await asyncio.sleep(settings.agent_interval_seconds)

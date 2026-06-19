@@ -67,20 +67,18 @@ async def extract_music_event(
             {
                 "role": "system",
                 "content": (
-                    "Extract J-pop live, concert, fanmeeting, festival, or ticket sales "
-                    "schedule information. Return null fields when unknown. "
-                    "Use ISO 8601 for date/time fields when possible. "
-                    "Translate user-facing title, venue, seat, price, and application "
-                    "period details into Korean. If linked page context contains seat "
-                    "types, seat prices, application start/end dates, lottery periods, "
-                    "or ticket sales URLs, include them in ticket_details_ko."
+                    "J-pop 라이브, 콘서트, 팬미팅, 페스티벌, 티켓 판매 일정 정보를 추출하세요. "
+                    "알 수 없는 필드는 null로 반환하세요. 날짜와 시간은 가능하면 ISO 8601 형식을 사용하세요. "
+                    "사용자에게 보이는 제목, 장소, 좌석, 가격, 신청 기간 정보는 한국어로 번역하세요. "
+                    "연결된 페이지 문맥에 좌석 종류, 좌석 가격, 신청 시작/종료일, 추첨 기간, "
+                    "티켓 판매 URL이 있으면 ticket_details_ko에 포함하세요."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Artist: {artist_name}\n\nPost:\n{raw_text}\n\n"
-                    f"Linked page context:\n{page_context or '(none)'}"
+                    f"아티스트: {artist_name}\n\n게시물:\n{raw_text}\n\n"
+                    f"연결 페이지 문맥:\n{page_context or '(없음)'}"
                 ),
             },
         ],
