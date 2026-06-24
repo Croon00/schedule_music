@@ -11,6 +11,8 @@ from app.core.config import settings
 
 def get_connection() -> Connection:
     """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환하게 합니다."""
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required for database-backed routes.")
     return psycopg.connect(settings.database_url, row_factory=dict_row)
 
 

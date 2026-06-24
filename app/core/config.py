@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     """Railway와 로컬 .env에서 읽어오는 앱 전체 설정입니다."""
 
     app_name: str = "schedule-music"
-    database_url: str
+    database_url: str | None = None
     discord_bot_token: str | None = None
     discord_guild_id: int | None = None
     agent_interval_seconds: int = 86400
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "discord_bot_token",
+        "database_url",
         "discord_guild_id",
         "public_base_url",
         "x_bearer_token",

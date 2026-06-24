@@ -23,12 +23,30 @@ from app.integrations.google_calendar import (
     exchange_code_for_tokens,
     google_oauth_configured,
 )
+from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
+from app.namuwiki.models import (
+    NamuWikiSavedTemplateSongArticleRequest,
+    NamuWikiSongArticleRequest,
+    NamuWikiSongArticleResponse,
+    NamuWikiTemplateCreate,
+    NamuWikiTemplateDetail,
+    NamuWikiTemplateInfo,
+    NamuWikiTemplateSongArticleRequest,
+)
+from app.namuwiki.renderer import render_song_article
+from app.namuwiki.template_store import (
+    NamuWikiTemplateNotFoundError,
+    get_template,
+    list_templates,
+    save_template,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """FastAPI 앱 시작 시 PostgreSQL 스키마를 준비합니다."""
-    init_db()
+    if settings.database_url:
+        init_db()
     yield
 
 
@@ -39,6 +57,62 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 def health() -> dict[str, str]:
     """배포된 API 서버가 살아있는지 확인하는 헬스 체크입니다."""
     return {"status": "ok"}
+
+
+@app.post("/namuwiki/song-article", response_model=NamuWikiSongArticleResponse)
+def create_namuwiki_song_article(
+    payload: NamuWikiSongArticleRequest,
+) -> NamuWikiSongArticleResponse:
+    return NamuWikiSongArticleResponse(text=render_song_article(payload))
+
+
+@app.post("/namuwiki/song-article/from-template", response_model=NamuWikiSongArticleResponse)
+async def create_namuwiki_song_article_from_template(
+    payload: NamuWikiTemplateSongArticleRequest,
+) -> NamuWikiSongArticleResponse:
+    try:
+        text = await render_song_article_from_template(payload)
+    except NamuWikiAiRenderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return NamuWikiSongArticleResponse(text=text)
+
+
+@app.post("/namuwiki/templates", response_model=NamuWikiTemplateDetail)
+def create_namuwiki_template(payload: NamuWikiTemplateCreate) -> NamuWikiTemplateDetail:
+    return save_template(payload)
+
+
+@app.get("/namuwiki/templates", response_model=list[NamuWikiTemplateInfo])
+def get_namuwiki_templates() -> list[NamuWikiTemplateInfo]:
+    return list_templates()
+
+
+@app.get("/namuwiki/templates/{template_id}", response_model=NamuWikiTemplateDetail)
+def get_namuwiki_template(template_id: str) -> NamuWikiTemplateDetail:
+    try:
+        return get_template(template_id)
+    except NamuWikiTemplateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Template not found.") from exc
+
+
+@app.post("/namuwiki/song-article/from-saved-template", response_model=NamuWikiSongArticleResponse)
+async def create_namuwiki_song_article_from_saved_template(
+    payload: NamuWikiSavedTemplateSongArticleRequest,
+) -> NamuWikiSongArticleResponse:
+    try:
+        template = get_template(payload.template_id)
+        text = await render_song_article_from_template(
+            NamuWikiTemplateSongArticleRequest(
+                template_example=template.template_example,
+                song=payload.song,
+                extra_instruction=payload.extra_instruction,
+            )
+        )
+    except NamuWikiTemplateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Template not found.") from exc
+    except NamuWikiAiRenderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return NamuWikiSongArticleResponse(text=text)
 
 
 @app.get("/auth/google/start")
