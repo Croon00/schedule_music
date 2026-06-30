@@ -539,13 +539,11 @@ async def google_connect(interaction: discord.Interaction) -> None:
 )
 @app_commands.describe(
     youtube_url="확인할 YouTube URL",
-    audio_fallback="수동 자막이 없을 때 가능한 경우 오디오 fallback을 사용합니다.",
-    language_code="Whisper에 전달할 원문 언어 코드입니다. 예: ja, en, ko",
+    language_code="원문 언어 코드입니다. 예: ja, en, ko",
 )
 async def lyrics_caption_test(
     interaction: discord.Interaction,
     youtube_url: str,
-    audio_fallback: bool = False,
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -553,12 +551,6 @@ async def lyrics_caption_test(
     pipeline = LyricsPipeline(
         caption_client=caption_client,
         ai_client=_NoopLyricsAiClient(),
-        audio_downloader=YtDlpAudioDownloader() if audio_fallback else None,
-        speech_to_text_client=(
-            OpenAiSpeechToTextClient(language=language_code.strip() or "ja")
-            if audio_fallback
-            else None
-        ),
     )
 
     try:
@@ -566,14 +558,12 @@ async def lyrics_caption_test(
         try:
             tracks = await caption_client.list_tracks(video_id)
         except YouTubeTranscriptApiException:
-            if not audio_fallback:
-                raise
-            tracks = []
+            raise
         raw = await pipeline.get_raw_lyrics(
             LyricsInput(
                 youtube_url=youtube_url,
                 preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                allow_audio_fallback=audio_fallback,
+                allow_audio_fallback=False,
             )
         )
         openai_error = None
@@ -633,7 +623,7 @@ async def lyrics_caption_test(
     await interaction.followup.send(
         (
             f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
-            f"검토 필요: `{raw.needs_review}` / 오디오 fallback: `{audio_fallback}`\n"
+            f"검토 필요: `{raw.needs_review}`\n"
             f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
             f"리포트 저장 경로: `{report_path}`"
         ),
