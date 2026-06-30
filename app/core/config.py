@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     webshare_proxy_locations: str | None = None
     ytdlp_proxy_url: str | None = None
     youtube_api_key: str | None = None
-    lyrics_context_extract_max_chars: int = 1000
+    lyrics_context_extract_max_chars: int = 15000
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None

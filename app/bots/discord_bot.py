@@ -8,12 +8,7 @@ from typing import Literal
 
 import discord
 from discord import app_commands
-from youtube_transcript_api._errors import (
-    IpBlocked,
-    RequestBlocked,
-    TranscriptsDisabled,
-    YouTubeTranscriptApiException,
-)
+from youtube_transcript_api._errors import YouTubeTranscriptApiException
 
 from app.core.config import settings
 from app.core.db import get_connection, init_db, row_to_dict
@@ -52,8 +47,8 @@ from app.namuwiki.template_store import (
 
 logger = logging.getLogger(__name__)
 
-LYRICS_SAMPLE_MAX_CHARS = 1000
-LYRICS_SAMPLE_MAX_LINES = 1000
+LYRICS_SAMPLE_MAX_CHARS = 15000
+LYRICS_SAMPLE_MAX_LINES = 15000
 LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 NAMUWIKI_FIELD_MAX_CHARS = 500
@@ -529,105 +524,6 @@ async def google_connect(interaction: discord.Interaction) -> None:
     auth_url = build_google_auth_url(str(interaction.user.id))
     await interaction.followup.send(
         f"아래 링크에서 Google Calendar를 연결하세요:\n{auth_url}",
-        ephemeral=True,
-    )
-
-
-@bot.tree.command(
-    name="lyrics_caption_test",
-    description="YouTube URL의 수동 자막 추출을 테스트합니다.",
-)
-@app_commands.describe(
-    youtube_url="확인할 YouTube URL",
-    language_code="원문 언어 코드입니다. 예: ja, en, ko",
-)
-async def lyrics_caption_test(
-    interaction: discord.Interaction,
-    youtube_url: str,
-    language_code: str = "ja",
-) -> None:
-    await interaction.response.defer(ephemeral=True)
-    caption_client = YouTubeTranscriptCaptionClient()
-    pipeline = LyricsPipeline(
-        caption_client=caption_client,
-        ai_client=_NoopLyricsAiClient(),
-    )
-
-    try:
-        video_id = extract_youtube_video_id(youtube_url)
-        try:
-            tracks = await caption_client.list_tracks(video_id)
-        except YouTubeTranscriptApiException:
-            raise
-        raw = await pipeline.get_raw_lyrics(
-            LyricsInput(
-                youtube_url=youtube_url,
-                preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                allow_audio_fallback=False,
-            )
-        )
-        openai_error = None
-        try:
-            translation_ko, pronunciation_ko = await _transform_caption_preview(raw)
-        except Exception as exc:
-            logger.exception("가사 미리보기 변환에 실패했습니다.")
-            translation_ko, pronunciation_ko = None, None
-            openai_error = str(exc)
-        report_path = _caption_report_path(video_id, str(interaction.user.id))
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            _caption_report(
-                youtube_url=youtube_url,
-                tracks=tracks,
-                raw=raw,
-                translation_ko=translation_ko,
-                pronunciation_ko=pronunciation_ko,
-            ),
-            encoding="utf-8",
-        )
-    except ValueError as exc:
-        await interaction.followup.send(f"올바르지 않은 YouTube URL입니다: {exc}", ephemeral=True)
-        return
-    except (IpBlocked, RequestBlocked):
-        await interaction.followup.send(
-            (
-                "YouTube가 이 봇 서버 IP의 자막 요청을 차단했습니다.\n"
-                "클라우드 호스트 IP이거나 요청이 많을 때 자주 발생합니다. "
-                "나중에 다시 시도하거나, 다른 네트워크에서 봇을 실행하거나, "
-                "youtube-transcript-api용 프록시를 설정하세요."
-            ),
-            ephemeral=True,
-        )
-        return
-    except TranscriptsDisabled:
-        await interaction.followup.send(
-            "이 영상은 youtube-transcript-api에서 접근 가능한 공개 자막을 제공하지 않습니다.",
-            ephemeral=True,
-        )
-        return
-    except LyricsPipelineError as exc:
-        await interaction.followup.send(f"사용 가능한 수동 자막이 없습니다: {exc}", ephemeral=True)
-        return
-    except YouTubeTranscriptApiException as exc:
-        logger.exception("YouTube 자막 조회에 실패했습니다.")
-        await interaction.followup.send(
-            f"YouTube 자막 조회에 실패했습니다: {type(exc).__name__}",
-            ephemeral=True,
-        )
-        return
-    except Exception as exc:
-        logger.exception("가사 자막 테스트 명령 처리에 실패했습니다.")
-        await interaction.followup.send(f"자막 테스트에 실패했습니다: {exc}", ephemeral=True)
-        return
-
-    await interaction.followup.send(
-        (
-            f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
-            f"검토 필요: `{raw.needs_review}`\n"
-            f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
-            f"리포트 저장 경로: `{report_path}`"
-        ),
-        file=discord.File(report_path),
         ephemeral=True,
     )
 
