@@ -21,7 +21,8 @@ JST = timezone(timedelta(hours=9))
 
 async def run_agent_once() -> dict[str, int]:
     """등록된 X 출처를 한 번 순회하며 새 게시물, 일정 후보, 캘린더 등록을 처리합니다."""
-    init_db()
+    if settings.database_auto_init:
+        init_db()
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -293,6 +294,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 async def agent_loop() -> None:
     """Railway 프로세스가 살아있는 동안 설정된 주기마다 agent를 반복 실행합니다."""
+    if not settings.agent_run_on_start:
+        await asyncio.sleep(settings.agent_interval_seconds)
+
     while True:
         try:
             result = await run_agent_once()

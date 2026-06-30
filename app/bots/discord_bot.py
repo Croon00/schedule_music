@@ -415,7 +415,8 @@ class ScheduleMusicBot(discord.Client):
 
     async def setup_hook(self) -> None:
         """봇 로그인 직후 DB를 준비하고 slash command를 Discord에 동기화합니다."""
-        init_db()
+        if settings.database_auto_init:
+            init_db()
         if settings.discord_guild_id:
             guild = discord.Object(id=settings.discord_guild_id)
             self.tree.copy_global_to(guild=guild)

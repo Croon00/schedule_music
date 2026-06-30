@@ -45,7 +45,7 @@ from app.namuwiki.template_store import (
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """FastAPI 앱 시작 시 PostgreSQL 스키마를 준비합니다."""
-    if settings.database_url:
+    if settings.database_url and settings.database_auto_init:
         init_db()
     yield
 

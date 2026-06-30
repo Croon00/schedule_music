@@ -9,6 +9,7 @@ import uvicorn
 from app.agents.scheduler import agent_loop
 from app.api.main import app
 from app.bots.discord_bot import start_discord_bot
+from app.core.config import settings
 
 
 async def _serve_api() -> None:
@@ -22,11 +23,16 @@ async def _serve_api() -> None:
 async def main() -> None:
     """API 서버, Discord 봇, agent loop를 하나의 Railway 프로세스에서 함께 실행합니다."""
     logging.basicConfig(level=logging.INFO)
-    await asyncio.gather(
+    tasks = [
         _serve_api(),
         start_discord_bot(),
-        agent_loop(),
-    )
+    ]
+    if settings.agent_enabled:
+        tasks.append(agent_loop())
+    else:
+        logging.info("Agent loop is disabled by AGENT_ENABLED=false.")
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
