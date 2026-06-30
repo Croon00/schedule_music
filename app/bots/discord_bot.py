@@ -4,6 +4,7 @@ from itertools import zip_longest
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -56,6 +57,7 @@ LYRICS_SAMPLE_MAX_LINES = 1000
 LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 NAMUWIKI_FIELD_MAX_CHARS = 500
+LyricsSourceMode = Literal["description", "comment", "caption", "audio"]
 
 
 class _NoopLyricsAiClient:
@@ -185,6 +187,85 @@ async def _fetch_context_lyrics_candidate(
     return None
 
 
+def _lyrics_pipeline_for_source(
+    *,
+    language_code: str,
+    audio_enabled: bool,
+) -> LyricsPipeline:
+    return LyricsPipeline(
+        caption_client=YouTubeTranscriptCaptionClient(),
+        ai_client=_NoopLyricsAiClient(),
+        audio_downloader=YtDlpAudioDownloader() if audio_enabled else None,
+        speech_to_text_client=(
+            OpenAiSpeechToTextClient(language=language_code.strip() or "ja")
+            if audio_enabled
+            else None
+        ),
+    )
+
+
+async def _collect_raw_lyrics_from_youtube(
+    *,
+    youtube_url: str,
+    language_code: str,
+    source_mode: LyricsSourceMode,
+) -> RawLyrics:
+    video_id = extract_youtube_video_id(youtube_url)
+    normalized_language = language_code.strip() or "ja"
+    pipeline = _lyrics_pipeline_for_source(
+        language_code=normalized_language,
+        audio_enabled=source_mode == "audio",
+    )
+
+    if source_mode == "description":
+        raw = await _fetch_context_lyrics_candidate(
+            video_id=video_id,
+            youtube_url=youtube_url,
+            use_description=True,
+            use_comment=False,
+            language_code=normalized_language,
+        )
+        if raw:
+            return raw
+        raise LyricsPipelineError("설명란에서 가사 후보를 찾지 못했습니다.")
+
+    if source_mode == "comment":
+        raw = await _fetch_context_lyrics_candidate(
+            video_id=video_id,
+            youtube_url=youtube_url,
+            use_description=False,
+            use_comment=True,
+            language_code=normalized_language,
+        )
+        if raw:
+            return raw
+        raise LyricsPipelineError("상단 댓글에서 가사 후보를 찾지 못했습니다.")
+
+    if source_mode == "caption":
+        return await pipeline.get_raw_lyrics(
+            LyricsInput(
+                youtube_url=youtube_url,
+                preferred_languages=(normalized_language, "ja", "en", "ko"),
+                allow_audio_fallback=False,
+            )
+        )
+
+    if source_mode == "audio":
+        audio_path = await YtDlpAudioDownloader().download_audio(youtube_url)
+        text = (await OpenAiSpeechToTextClient(language=normalized_language).transcribe(audio_path)).strip()
+        if not text:
+            raise LyricsPipelineError("오디오 전사 결과가 비어 있습니다.")
+        return RawLyrics(
+            text=text,
+            source_type=LyricsSourceType.AUDIO_TRANSCRIPT,
+            language_code=normalized_language,
+            source_url=youtube_url,
+            needs_review=True,
+        )
+
+    raise LyricsPipelineError("지원하지 않는 YouTube 가사 소스입니다.")
+
+
 def _openai_status_text(
     translation_ko: str | None,
     pronunciation_ko: str | None,
@@ -267,72 +348,13 @@ async def _collect_raw_lyrics_for_namuwiki(
     *,
     youtube_url: str,
     language_code: str,
-    description_fallback: bool,
-    comment_fallback: bool,
-    audio_fallback: bool,
+    source_mode: LyricsSourceMode,
 ) -> RawLyrics:
-    caption_client = YouTubeTranscriptCaptionClient()
-    pipeline = LyricsPipeline(
-        caption_client=caption_client,
-        ai_client=_NoopLyricsAiClient(),
-        audio_downloader=YtDlpAudioDownloader() if audio_fallback else None,
-        speech_to_text_client=(
-            OpenAiSpeechToTextClient(language=language_code.strip() or "ja")
-            if audio_fallback
-            else None
-        ),
+    return await _collect_raw_lyrics_from_youtube(
+        youtube_url=youtube_url,
+        language_code=language_code,
+        source_mode=source_mode,
     )
-    video_id = extract_youtube_video_id(youtube_url)
-
-    try:
-        return await pipeline.get_raw_lyrics(
-            LyricsInput(
-                youtube_url=youtube_url,
-                preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                allow_audio_fallback=False,
-            )
-        )
-    except Exception as exc:
-        logger.info("나무위키 문서 생성용 수동 자막을 사용할 수 없습니다: %s", exc)
-
-    if description_fallback:
-        try:
-            raw = await _fetch_context_lyrics_candidate(
-                video_id=video_id,
-                youtube_url=youtube_url,
-                use_description=True,
-                use_comment=False,
-                language_code=language_code.strip() or "ja",
-            )
-            if raw:
-                return raw
-        except Exception:
-            logger.exception("나무위키 문서 생성용 설명란 가사 후보 조회에 실패했습니다.")
-
-    if comment_fallback:
-        try:
-            raw = await _fetch_context_lyrics_candidate(
-                video_id=video_id,
-                youtube_url=youtube_url,
-                use_description=False,
-                use_comment=True,
-                language_code=language_code.strip() or "ja",
-            )
-            if raw:
-                return raw
-        except Exception:
-            logger.exception("나무위키 문서 생성용 상단 댓글 가사 후보 조회에 실패했습니다.")
-
-    if audio_fallback:
-        return await pipeline.get_raw_lyrics(
-            LyricsInput(
-                youtube_url=youtube_url,
-                preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                allow_audio_fallback=True,
-            )
-        )
-
-    raise LyricsPipelineError("가사 후보를 찾지 못했습니다. fallback 옵션을 켜거나 가사를 직접 확인하세요.")
 
 
 def _create_artist(
@@ -622,35 +644,21 @@ async def lyrics_caption_test(
 
 @bot.tree.command(
     name="lyrics_source_test",
-    description="YouTube URL에서 자막, 설명란, 상단 댓글, 오디오 fallback 선택을 테스트합니다.",
+    description="YouTube URL에서 설명란, 상단 댓글, 수동 자막, 오디오 전사 중 하나를 테스트합니다.",
 )
 @app_commands.describe(
     youtube_url="확인할 YouTube URL",
-    description_fallback="수동 자막이 없으면 영상 설명란에서 가사 후보를 찾습니다.",
-    comment_fallback="수동 자막이 없으면 상단 댓글에서 가사 후보를 찾습니다.",
-    audio_fallback="다른 소스가 실패하면 가능한 경우 오디오 fallback을 사용합니다.",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio 중 하나만 사용합니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
 )
 async def lyrics_source_test(
     interaction: discord.Interaction,
     youtube_url: str,
-    description_fallback: bool = False,
-    comment_fallback: bool = False,
-    audio_fallback: bool = False,
+    source_mode: LyricsSourceMode = "caption",
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
     caption_client = YouTubeTranscriptCaptionClient()
-    pipeline = LyricsPipeline(
-        caption_client=caption_client,
-        ai_client=_NoopLyricsAiClient(),
-        audio_downloader=YtDlpAudioDownloader() if audio_fallback else None,
-        speech_to_text_client=(
-            OpenAiSpeechToTextClient(language=language_code.strip() or "ja")
-            if audio_fallback
-            else None
-        ),
-    )
 
     try:
         video_id = extract_youtube_video_id(youtube_url)
@@ -659,53 +667,11 @@ async def lyrics_source_test(
         except YouTubeTranscriptApiException:
             tracks = []
 
-        raw = None
-        try:
-            raw = await _fetch_context_lyrics_candidate(
-                video_id=video_id,
-                youtube_url=youtube_url,
-                use_description=True,
-                use_comment=False,
-                language_code=language_code.strip() or "ja",
-            )
-        except Exception:
-            logger.exception("YouTube 설명란에서 가사 후보를 찾는 데 실패했습니다.")
-
-        if raw is None:
-            try:
-                raw = await pipeline.get_raw_lyrics(
-                    LyricsInput(
-                        youtube_url=youtube_url,
-                        preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                        allow_audio_fallback=False,
-                    )
-                )
-            except Exception:
-                logger.exception("수동 자막 조회에 실패했거나 사용할 수 있는 수동 자막이 없습니다.")
-
-        if raw is None:
-            try:
-                raw = await _fetch_context_lyrics_candidate(
-                    video_id=video_id,
-                    youtube_url=youtube_url,
-                    use_description=False,
-                    use_comment=True,
-                    language_code=language_code.strip() or "ja",
-                )
-            except Exception:
-                logger.exception("YouTube 상단 댓글에서 가사 후보를 찾는 데 실패했습니다.")
-
-        if raw is None and audio_fallback:
-            raw = await pipeline.get_raw_lyrics(
-                LyricsInput(
-                    youtube_url=youtube_url,
-                    preferred_languages=(language_code.strip() or "ja", "ja", "en", "ko"),
-                    allow_audio_fallback=True,
-                )
-            )
-
-        if raw is None:
-            raise LyricsPipelineError("선택한 소스에서 가사 후보를 찾지 못했습니다.")
+        raw = await _collect_raw_lyrics_from_youtube(
+            youtube_url=youtube_url,
+            language_code=language_code,
+            source_mode=source_mode,
+        )
 
         openai_error = None
         try:
@@ -741,7 +707,7 @@ async def lyrics_source_test(
     await interaction.followup.send(
         (
             f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
-            f"검토 필요: `{raw.needs_review}`\n"
+            f"source_mode: `{source_mode}` / 검토 필요: `{raw.needs_review}`\n"
             f"{_openai_status_text(translation_ko, pronunciation_ko, openai_error)}\n"
             f"리포트 저장 경로: `{report_path}`"
         ),
@@ -818,9 +784,7 @@ async def namuwiki_template_list(interaction: discord.Interaction) -> None:
     release_date="선택 발매일입니다. 예: 2026. 06. 25.",
     album="선택 앨범/싱글명입니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
-    description_fallback="자막이 없으면 설명란에서 가사 후보를 찾습니다.",
-    comment_fallback="자막이 없으면 상단 댓글에서 가사 후보를 찾습니다.",
-    audio_fallback="다른 소스가 실패하면 오디오 fallback을 사용합니다.",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio 중 하나만 사용합니다.",
     extra_instruction="템플릿 적용 시 추가 지시입니다.",
 )
 async def namuwiki_render(
@@ -832,9 +796,7 @@ async def namuwiki_render(
     release_date: str | None = None,
     album: str | None = None,
     language_code: str = "ja",
-    description_fallback: bool = True,
-    comment_fallback: bool = True,
-    audio_fallback: bool = False,
+    source_mode: LyricsSourceMode = "caption",
     extra_instruction: str | None = None,
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -847,9 +809,7 @@ async def namuwiki_render(
         raw = await _collect_raw_lyrics_for_namuwiki(
             youtube_url=youtube_url,
             language_code=language_code,
-            description_fallback=description_fallback,
-            comment_fallback=comment_fallback,
-            audio_fallback=audio_fallback,
+            source_mode=source_mode,
         )
 
         ai_client = OpenAiLyricsClient()
@@ -891,7 +851,7 @@ async def namuwiki_render(
     await interaction.followup.send(
         (
             f"나무위키 문서 생성 완료: `{title}`\n"
-            f"템플릿: `{template.template_id}` / 가사 출처: `{raw.source_type}`\n"
+            f"템플릿: `{template.template_id}` / source_mode: `{source_mode}` / 가사 출처: `{raw.source_type}`\n"
             f"검토 필요: `{raw.needs_review}` / 저장 경로: `{output_path}`"
         ),
         file=discord.File(output_path),

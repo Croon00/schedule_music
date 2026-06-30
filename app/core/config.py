@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     discord_bot_token: str | None = None
     discord_guild_id: int | None = None
     agent_interval_seconds: int = 86400
-    agent_enabled: bool = True
-    agent_run_on_start: bool = True
-    database_auto_init: bool = True
+    agent_enabled: bool = False
+    agent_run_on_start: bool = False
+    database_auto_init: bool = False
     public_base_url: str | None = None
     x_bearer_token: str | None = None
     openai_api_key: str | None = None
