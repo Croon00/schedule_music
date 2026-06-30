@@ -273,6 +273,15 @@ class OpenAiLyricsClient:
                     ),
                 },
                 {
+                    "role": "system",
+                    "content": (
+                        "For pronunciation_ko, keep English words, English sentences, romanized text, "
+                        "artist names, song titles, and proper nouns exactly as written in the original. "
+                        "Do not convert English into Korean phonetic spelling. Only non-Latin lyrics, "
+                        "such as Japanese or Chinese, should be written as Korean-style pronunciation."
+                    ),
+                },
+                {
                     "role": "user",
                     "content": (
                         f"아티스트: {artist or '(알 수 없음)'}\n"
