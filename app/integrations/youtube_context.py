@@ -109,8 +109,7 @@ async def extract_lyrics_candidate(text: str, source_name: str) -> tuple[str, st
                 "content": (
                     "주어진 YouTube 설명란 또는 댓글에서 노래 가사로 보이는 부분이 있는지 판단하세요. "
                     "가사라는 단어가 없어도 절취선, 여러 줄로 이어진 시적 문장, 반복구, 곡 구조처럼 "
-                    "보이면 후보로 볼 수 있습니다. 단, 전체 가사를 길게 반환하지 말고 테스트용 짧은 "
-                    f"미리보기로 최대 {max_chars}자까지만 excerpt에 담으세요. 가사 후보가 아니면 "
+                    "보이면 후보로 볼 수 있습니다. 전체 가사를 길게 반환, 가사 후보가 아니면 "
                     "is_lyrics_candidate=false와 빈 excerpt를 반환하세요."
                 ),
             },

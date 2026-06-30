@@ -123,14 +123,14 @@ def _caption_report(
         "사용 가능한 자막",
         available_captions,
         "",
-        "## 원문 미리보기",
+        "## 원문",
         "",
         _caption_sample(raw.text),
     ]
     if translation_ko is not None:
-        sections.extend(["", "## 한국어 번역 미리보기", "", translation_ko])
+        sections.extend(["", "## 한국어 번역", "", translation_ko])
     if pronunciation_ko is not None:
-        sections.extend(["", "## 한글 발음 미리보기", "", pronunciation_ko])
+        sections.extend(["", "## 한글 발음", "", pronunciation_ko])
     return "\n".join(sections).rstrip() + "\n"
 
 async def _transform_caption_preview(raw: RawLyrics) -> tuple[str | None, str | None]:
