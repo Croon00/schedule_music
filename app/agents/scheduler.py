@@ -58,7 +58,7 @@ async def run_agent_once() -> dict[str, int]:
             for key, value in source_result.items():
                 result[key] += value
         except Exception:
-            logger.exception("출처 %s 처리 중 에이전트가 실패했습니다.", source["id"])
+            logger.exception("출처 %s 처리 중 agent가 실패했습니다.", source["id"])
 
     return result
 
@@ -167,7 +167,7 @@ def _insert_event_candidate(
     extracted: dict[str, Any],
     raw_text: str,
 ) -> dict[str, Any]:
-    """AI가 추출한 공연/티켓 정보를 일정 후보 테이블에 저장합니다."""
+    """AI가 추출한 공연/예매 정보를 일정 후보 테이블에 저장합니다."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
@@ -205,7 +205,7 @@ def _insert_calendar_sync(
     provider_event_id: str,
     event_type: str = "live",
 ) -> None:
-    """Google Calendar에 생성된 이벤트 ID를 저장해 중복 등록을 추적합니다."""
+    """Google Calendar에 생성한 event ID를 저장해 중복 등록을 추적합니다."""
     with get_connection() as conn:
         conn.execute(
             """
@@ -293,15 +293,15 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 
 async def agent_loop() -> None:
-    """Railway 프로세스가 살아있는 동안 설정된 주기마다 agent를 반복 실행합니다."""
+    """Railway 프로세스가 살아 있는 동안 설정된 주기마다 agent를 반복 실행합니다."""
     if not settings.agent_run_on_start:
         await asyncio.sleep(settings.agent_interval_seconds)
 
     while True:
         try:
             result = await run_agent_once()
-            logger.info("에이전트 실행 완료: %s", result)
+            logger.info("agent 실행 완료: %s", result)
         except Exception:
-            logger.exception("에이전트 실행에 실패했습니다.")
+            logger.exception("agent 실행에 실패했습니다.")
 
         await asyncio.sleep(settings.agent_interval_seconds)

@@ -40,7 +40,7 @@ def test_to_ticket_google_event_uses_ticket_period_and_details() -> None:
         }
     )
 
-    assert payload["summary"] == "티켓/응모 기간: 카미츠바키 페스 2026"
+    assert payload["summary"] == "예매/응모 기간: 카미츠바키 페스 2026"
     assert payload["start"] == {"dateTime": "2026-06-10T18:00:00+09:00"}
     assert payload["end"] == {"dateTime": "2026-06-22T23:59:00+09:00"}
     assert "S석: 12,000엔" in payload["description"]

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LyricsSourceType(StrEnum):
@@ -12,33 +13,33 @@ class LyricsSourceType(StrEnum):
     USER_LYRICS = "user_lyrics"
 
 
-@dataclass(frozen=True)
-class CaptionTrack:
-    language_code: str
-    language_name: str
+class LyricsBaseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class CaptionTrack(LyricsBaseModel):
+    language_code: str = Field(min_length=1)
+    language_name: str = Field(min_length=1)
     is_generated: bool = False
 
 
-@dataclass(frozen=True)
-class LyricsInput:
-    youtube_url: str
+class LyricsInput(LyricsBaseModel):
+    youtube_url: str = Field(min_length=1)
     artist: str | None = None
     title: str | None = None
     preferred_languages: tuple[str, ...] = ("ja", "en", "ko")
     allow_audio_fallback: bool = False
 
 
-@dataclass(frozen=True)
-class RawLyrics:
-    text: str
+class RawLyrics(LyricsBaseModel):
+    text: str = Field(min_length=1)
     source_type: LyricsSourceType
     language_code: str | None = None
     source_url: str | None = None
     needs_review: bool = False
 
 
-@dataclass(frozen=True)
-class LyricsTransform:
+class LyricsTransform(LyricsBaseModel):
     original: str
     translation_ko: str
     pronunciation_ko: str
@@ -46,8 +47,7 @@ class LyricsTransform:
     needs_review: bool
 
 
-@dataclass(frozen=True)
-class NamuWikiRender:
+class NamuWikiRender(LyricsBaseModel):
     text: str
     source_type: LyricsSourceType
     needs_review: bool

@@ -145,7 +145,7 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
 
 
 async def create_calendar_events(discord_user_id: str, event: dict[str, Any]) -> dict[str, str]:
-    """공연 날짜와 티켓/응모 날짜를 별도 Calendar 일정으로 생성합니다."""
+    """공연 날짜와 예매/응모 날짜를 별도 Calendar 일정으로 생성합니다."""
     created = {}
     if event.get("starts_at"):
         created["live"] = await _create_calendar_event_from_payload(
@@ -258,9 +258,9 @@ def _to_google_event(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _to_ticket_google_event(event: dict[str, Any]) -> dict[str, Any]:
-    title = f"티켓/응모 시작: {event['title']}"
+    title = f"예매/응모 시작: {event['title']}"
     if event.get("ticket_closes_at"):
-        title = f"티켓/응모 기간: {event['title']}"
+        title = f"예매/응모 기간: {event['title']}"
 
     starts_at = event["ticket_opens_at"]
     payload = {
@@ -285,9 +285,9 @@ def _build_description(event: dict[str, Any]) -> str:
     if event.get("source_url"):
         description_parts.append(f"출처: {event['source_url']}")
     if event.get("ticket_url"):
-        description_parts.append(f"티켓: {event['ticket_url']}")
+        description_parts.append(f"예매: {event['ticket_url']}")
     if event.get("price_text"):
-        description_parts.append(f"티켓 정보:\n{event['price_text']}")
+        description_parts.append(f"예매 정보:\n{event['price_text']}")
     if event.get("raw_text"):
         description_parts.append(event["raw_text"])
     return "\n\n".join(description_parts)

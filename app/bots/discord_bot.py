@@ -8,6 +8,7 @@ from typing import Literal
 
 import discord
 from discord import app_commands
+from psycopg.types.json import Jsonb
 from youtube_transcript_api._errors import YouTubeTranscriptApiException
 
 from app.core.config import settings
@@ -17,6 +18,7 @@ from app.integrations.google_calendar import (
     google_connected,
     google_oauth_configured,
 )
+from app.integrations.spotify import SpotifyTrackInfo, search_spotify_track, spotify_configured
 from app.integrations.youtube_context import (
     extract_lyrics_candidate,
     fetch_top_comment,
@@ -130,8 +132,9 @@ def _caption_report(
     if translation_ko is not None:
         sections.extend(["", "## 한국어 번역", "", translation_ko])
     if pronunciation_ko is not None:
-        sections.extend(["", "## 한글 발음", "", pronunciation_ko])
+        sections.extend(["", "## 한국어 발음", "", pronunciation_ko])
     return "\n".join(sections).rstrip() + "\n"
+
 
 async def _transform_caption_preview(raw: RawLyrics) -> tuple[str | None, str | None]:
     if not settings.openai_api_key:
@@ -222,7 +225,7 @@ async def _collect_raw_lyrics_from_youtube(
         )
         if raw:
             return raw
-        raise LyricsPipelineError("설명란에서 가사 후보를 찾지 못했습니다.")
+        raise LyricsPipelineError("설명란에서 가사 후보를 찾을 수 없습니다.")
 
     if source_mode == "comment":
         raw = await _fetch_context_lyrics_candidate(
@@ -234,7 +237,7 @@ async def _collect_raw_lyrics_from_youtube(
         )
         if raw:
             return raw
-        raise LyricsPipelineError("상단 댓글에서 가사 후보를 찾지 못했습니다.")
+        raise LyricsPipelineError("상단 댓글에서 가사 후보를 찾을 수 없습니다.")
 
     if source_mode == "caption":
         return await pipeline.get_raw_lyrics(
@@ -359,7 +362,7 @@ def _create_artist(
     display_name: str | None,
     notes: str | None,
 ) -> dict:
-    """Discord 사용자 계정에 귀속된 아티스트와 X 출처를 DB에 함께 등록합니다."""
+    """Discord 사용자 계정에 연결된 아티스트와 X 출처를 DB에 함께 등록합니다."""
     normalized_x_username = _normalize_x_username(x_username)
     if not normalized_x_username:
         raise ValueError("X 사용자명은 필수입니다.")
@@ -415,10 +418,111 @@ def _list_artists(discord_user_id: str) -> list[dict]:
             WHERE a.discord_user_id = %s
             ORDER BY a.name
             LIMIT 25
-            """
-            ,
+            """,
             (discord_user_id,),
         ).fetchall()
+
+
+def _save_song_with_lyrics(
+    *,
+    discord_user_id: str,
+    youtube_url: str,
+    youtube_video_id: str,
+    artist_name: str,
+    original_title: str,
+    title_ko: str | None,
+    artist_name_ko: str | None,
+    raw: RawLyrics,
+    translation_ko: str,
+    pronunciation_ko: str,
+    spotify: SpotifyTrackInfo | None,
+) -> int:
+    """곡 메타데이터와 원문/번역/발음을 DB에 저장하고 song id를 반환합니다."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO songs (
+                discord_user_id, original_title, title_ko, artist_name, artist_name_ko,
+                album_name, release_date, language_code, duration_ms,
+                youtube_url, youtube_video_id, spotify_track_id, spotify_url,
+                spotify_album_id, spotify_artist_ids, cover_image_url, spotify_raw
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+            ON CONFLICT (discord_user_id, youtube_video_id) DO UPDATE SET
+                original_title = EXCLUDED.original_title,
+                title_ko = EXCLUDED.title_ko,
+                artist_name = EXCLUDED.artist_name,
+                artist_name_ko = EXCLUDED.artist_name_ko,
+                album_name = EXCLUDED.album_name,
+                release_date = EXCLUDED.release_date,
+                language_code = EXCLUDED.language_code,
+                duration_ms = EXCLUDED.duration_ms,
+                youtube_url = EXCLUDED.youtube_url,
+                spotify_track_id = EXCLUDED.spotify_track_id,
+                spotify_url = EXCLUDED.spotify_url,
+                spotify_album_id = EXCLUDED.spotify_album_id,
+                spotify_artist_ids = EXCLUDED.spotify_artist_ids,
+                cover_image_url = EXCLUDED.cover_image_url,
+                spotify_raw = EXCLUDED.spotify_raw,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+            """,
+            (
+                discord_user_id,
+                original_title,
+                title_ko,
+                artist_name,
+                artist_name_ko,
+                spotify.album_name if spotify else None,
+                spotify.release_date if spotify else None,
+                raw.language_code,
+                spotify.duration_ms if spotify else None,
+                youtube_url,
+                youtube_video_id,
+                spotify.track_id if spotify else None,
+                spotify.spotify_url if spotify else None,
+                spotify.album_id if spotify else None,
+                spotify.artist_ids if spotify else None,
+                spotify.cover_image_url if spotify else None,
+                Jsonb(spotify.raw) if spotify else None,
+            ),
+        )
+        song_id = cursor.fetchone()["id"]
+        conn.execute(
+            """
+            INSERT INTO song_lyrics (
+                song_id, original_lyrics, translation_ko, pronunciation_ko,
+                lyrics_source_type, lyrics_source_url, translation_model, needs_review
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (song_id) DO UPDATE SET
+                original_lyrics = EXCLUDED.original_lyrics,
+                translation_ko = EXCLUDED.translation_ko,
+                pronunciation_ko = EXCLUDED.pronunciation_ko,
+                lyrics_source_type = EXCLUDED.lyrics_source_type,
+                lyrics_source_url = EXCLUDED.lyrics_source_url,
+                translation_model = EXCLUDED.translation_model,
+                needs_review = EXCLUDED.needs_review,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                song_id,
+                raw.text,
+                translation_ko,
+                pronunciation_ko,
+                str(raw.source_type),
+                raw.source_url,
+                settings.openai_model,
+                raw.needs_review,
+            ),
+        )
+        conn.commit()
+        return int(song_id)
 
 
 class ScheduleMusicBot(discord.Client):
@@ -504,7 +608,7 @@ async def artist_delete(interaction: discord.Interaction, artist_id: int) -> Non
     if deleted:
         await interaction.followup.send(f"아티스트 #{artist_id}를 삭제했습니다.", ephemeral=True)
     else:
-        await interaction.followup.send(f"아티스트 #{artist_id}를 찾지 못했습니다.", ephemeral=True)
+        await interaction.followup.send(f"아티스트 #{artist_id}를 찾을 수 없습니다.", ephemeral=True)
 
 
 @bot.tree.command(name="google_connect", description="Google Calendar를 연결합니다.")
@@ -523,13 +627,13 @@ async def google_connect(interaction: discord.Interaction) -> None:
 
     auth_url = build_google_auth_url(str(interaction.user.id))
     await interaction.followup.send(
-        f"아래 링크에서 Google Calendar를 연결하세요:\n{auth_url}",
+        f"아래 링크에서 Google Calendar를 연결하세요.\n{auth_url}",
         ephemeral=True,
     )
 
 
 @bot.tree.command(
-    name="lyrics_source_test",
+    name="lyrics_source",
     description="YouTube URL에서 설명란, 상단 댓글, 수동 자막, 오디오 전사 중 하나를 테스트합니다.",
 )
 @app_commands.describe(
@@ -537,7 +641,7 @@ async def google_connect(interaction: discord.Interaction) -> None:
     source_mode="가사를 가져올 소스입니다. description, comment, caption, audio 중 하나만 사용합니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
 )
-async def lyrics_source_test(
+async def lyrics_source(
     interaction: discord.Interaction,
     youtube_url: str,
     source_mode: LyricsSourceMode = "caption",
@@ -580,10 +684,10 @@ async def lyrics_source_test(
             encoding="utf-8",
         )
     except ValueError as exc:
-        await interaction.followup.send(f"올바르지 않은 YouTube URL입니다: {exc}", ephemeral=True)
+        await interaction.followup.send(f"올바르지 않은 YouTube URL입니다. {exc}", ephemeral=True)
         return
     except LyricsPipelineError as exc:
-        await interaction.followup.send(f"가사 후보를 찾지 못했습니다: {exc}", ephemeral=True)
+        await interaction.followup.send(f"가사 후보를 찾을 수 없습니다. {exc}", ephemeral=True)
         return
     except Exception as exc:
         logger.exception("가사 소스 테스트 명령 처리에 실패했습니다.")
@@ -598,6 +702,94 @@ async def lyrics_source_test(
             f"리포트 저장 경로: `{report_path}`"
         ),
         file=discord.File(report_path),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="song_save", description="YouTube 곡 가사, 번역, 발음, Spotify 정보를 DB에 저장합니다.")
+@app_commands.describe(
+    youtube_url="저장할 곡의 YouTube URL",
+    artist="아티스트 이름",
+    title="원본 곡 제목",
+    title_ko="선택 한글 곡 제목",
+    artist_name_ko="선택 한글 아티스트 이름",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio 중 하나만 사용합니다.",
+    language_code="원문 언어 코드입니다. 예: ja, en, ko",
+)
+async def song_save(
+    interaction: discord.Interaction,
+    youtube_url: str,
+    artist: str,
+    title: str,
+    title_ko: str | None = None,
+    artist_name_ko: str | None = None,
+    source_mode: LyricsSourceMode = "caption",
+    language_code: str = "ja",
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    if not settings.database_url:
+        await interaction.followup.send("DATABASE_URL이 설정되어 있어야 저장할 수 있습니다.", ephemeral=True)
+        return
+    if not settings.openai_api_key:
+        await interaction.followup.send("OPENAI_API_KEY가 설정되어 있어야 번역/발음을 저장할 수 있습니다.", ephemeral=True)
+        return
+
+    try:
+        if settings.database_auto_init:
+            init_db()
+
+        video_id = extract_youtube_video_id(youtube_url)
+        raw = await _collect_raw_lyrics_from_youtube(
+            youtube_url=youtube_url,
+            language_code=language_code,
+            source_mode=source_mode,
+        )
+
+        ai_client = OpenAiLyricsClient()
+        translation_ko, pronunciation_ko = await ai_client.transform_lyrics(
+            lyrics=raw.text,
+            artist=artist,
+            title=title,
+        )
+
+        spotify = await search_spotify_track(artist, title) if spotify_configured() else None
+        song_id = _save_song_with_lyrics(
+            discord_user_id=str(interaction.user.id),
+            youtube_url=youtube_url,
+            youtube_video_id=video_id,
+            artist_name=artist.strip(),
+            original_title=title.strip(),
+            title_ko=title_ko.strip() if title_ko else None,
+            artist_name_ko=artist_name_ko.strip() if artist_name_ko else None,
+            raw=raw,
+            translation_ko=translation_ko,
+            pronunciation_ko=pronunciation_ko,
+            spotify=spotify,
+        )
+    except ValueError as exc:
+        await interaction.followup.send(f"올바르지 않은 YouTube URL입니다. {exc}", ephemeral=True)
+        return
+    except LyricsPipelineError as exc:
+        await interaction.followup.send(f"가사 후보를 찾을 수 없습니다. {exc}", ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("곡 저장 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"곡 저장에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    spotify_line = (
+        f"Spotify: {spotify.name} - {', '.join(spotify.artists)}"
+        if spotify
+        else "Spotify: 설정 없음 또는 검색 결과 없음"
+    )
+    await interaction.followup.send(
+        (
+            f"곡 저장 완료: song #{song_id}\n"
+            f"제목: {title}\n"
+            f"아티스트: {artist}\n"
+            f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
+            f"{spotify_line}"
+        ),
         ephemeral=True,
     )
 
@@ -724,7 +916,7 @@ async def namuwiki_render(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(article, encoding="utf-8")
     except NamuWikiTemplateNotFoundError:
-        await interaction.followup.send(f"템플릿 `{template_id}`를 찾지 못했습니다.", ephemeral=True)
+        await interaction.followup.send(f"템플릿 `{template_id}`를 찾을 수 없습니다.", ephemeral=True)
         return
     except (ValueError, LyricsPipelineError, NamuWikiAiRenderError) as exc:
         await interaction.followup.send(f"나무위키 문서 생성에 실패했습니다: {exc}", ephemeral=True)
@@ -737,7 +929,7 @@ async def namuwiki_render(
     await interaction.followup.send(
         (
             f"나무위키 문서 생성 완료: `{title}`\n"
-            f"템플릿: `{template.template_id}` / source_mode: `{source_mode}` / 가사 출처: `{raw.source_type}`\n"
+            f"템플릿 `{template.template_id}` / source_mode: `{source_mode}` / 가사 출처: `{raw.source_type}`\n"
             f"검토 필요: `{raw.needs_review}` / 저장 경로: `{output_path}`"
         ),
         file=discord.File(output_path),

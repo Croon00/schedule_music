@@ -44,7 +44,7 @@ from app.namuwiki.template_store import (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """FastAPI 앱 시작 시 PostgreSQL 스키마를 준비합니다."""
+    """FastAPI 시작 시 PostgreSQL 스키마를 준비합니다."""
     if settings.database_url and settings.database_auto_init:
         init_db()
     yield
@@ -55,7 +55,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    """배포된 API 서버가 살아있는지 확인하는 헬스 체크입니다."""
+    """배포된 API 서버가 살아 있는지 확인하는 헬스 체크입니다."""
     return {"status": "ok"}
 
 
@@ -220,7 +220,7 @@ def delete_artist(artist_id: int) -> Response:
     status_code=status.HTTP_201_CREATED,
 )
 def add_artist_source(artist_id: int, payload: SourceCreate) -> dict:
-    """기존 아티스트에 X, 공식 사이트, 티켓 사이트 같은 출처를 추가합니다."""
+    """기존 아티스트에 X, 공식 사이트, 예매 사이트 같은 출처를 추가합니다."""
     with get_connection() as conn:
         _ensure_artist_exists(conn, artist_id)
         try:
@@ -277,14 +277,14 @@ def delete_artist_source(artist_id: int, source_id: int) -> Response:
             (source_id, artist_id),
         )
         if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="출처를 찾지 못했습니다.")
+            raise HTTPException(status_code=404, detail="출처를 찾을 수 없습니다.")
         conn.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/event-candidates", response_model=EventCandidate, status_code=status.HTTP_201_CREATED)
 def create_event_candidate(payload: EventCandidateCreate) -> dict:
-    """수동 또는 agent가 만든 공연/티켓 일정 후보를 저장합니다."""
+    """수동 또는 agent가 만든 공연/예매 일정 후보를 저장합니다."""
     data = payload.model_dump()
     with get_connection() as conn:
         cursor = conn.execute(
@@ -344,7 +344,7 @@ def _ensure_artist_exists(conn: Connection, artist_id: int) -> None:
     """아티스트가 실제로 존재하는지 확인하고 없으면 404 에러를 발생시킵니다."""
     row = conn.execute("SELECT id FROM artists WHERE id = %s", (artist_id,)).fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="아티스트를 찾지 못했습니다.")
+        raise HTTPException(status_code=404, detail="아티스트를 찾을 수 없습니다.")
 
 
 def _get_artist_with_sources(conn: Connection, artist_id: int) -> dict:
@@ -353,7 +353,7 @@ def _get_artist_with_sources(conn: Connection, artist_id: int) -> dict:
         conn.execute("SELECT * FROM artists WHERE id = %s", (artist_id,)).fetchone()
     )
     if artist is None:
-        raise HTTPException(status_code=404, detail="아티스트를 찾지 못했습니다.")
+        raise HTTPException(status_code=404, detail="아티스트를 찾을 수 없습니다.")
 
     sources = conn.execute(
         """
@@ -371,5 +371,5 @@ def _source_row_to_dict(row: dict | None) -> dict:
     """DB에서 읽은 출처 row를 API 응답용 dict로 변환합니다."""
     source = row_to_dict(row)
     if source is None:
-        raise HTTPException(status_code=404, detail="출처를 찾지 못했습니다.")
+        raise HTTPException(status_code=404, detail="출처를 찾을 수 없습니다.")
     return source

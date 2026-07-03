@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     google_redirect_uri: str | None = None
     google_calendar_id: str = "primary"
+    spotify_client_id: str | None = None
+    spotify_client_secret: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -51,6 +53,8 @@ class Settings(BaseSettings):
         "google_client_id",
         "google_client_secret",
         "google_redirect_uri",
+        "spotify_client_id",
+        "spotify_client_secret",
         mode="before",
     )
     @classmethod

@@ -96,8 +96,8 @@ def test_normalize_caption_text_removes_empty_and_duplicate_lines() -> None:
 async def test_pipeline_prefers_manual_uploader_caption() -> None:
     caption_client = FakeCaptionClient(
         tracks=[
-            CaptionTrack("en", "English", is_generated=True),
-            CaptionTrack("ja", "Japanese", is_generated=False),
+            CaptionTrack(language_code="en", language_name="English", is_generated=True),
+            CaptionTrack(language_code="ja", language_name="Japanese", is_generated=False),
         ],
         captions={"ja": "manual lyrics"},
     )
@@ -123,7 +123,7 @@ async def test_pipeline_falls_back_to_audio_when_no_manual_caption() -> None:
     downloader = FakeAudioDownloader()
     pipeline = LyricsPipeline(
         caption_client=FakeCaptionClient(
-            tracks=[CaptionTrack("ja", "Japanese", is_generated=True)],
+            tracks=[CaptionTrack(language_code="ja", language_name="Japanese", is_generated=True)],
             captions={"ja": "generated captions should be ignored"},
         ),
         ai_client=FakeAiClient(),
@@ -184,7 +184,7 @@ async def test_pipeline_errors_without_caption_or_audio_fallback() -> None:
 async def test_pipeline_renders_namuwiki_markup() -> None:
     pipeline = LyricsPipeline(
         caption_client=FakeCaptionClient(
-            tracks=[CaptionTrack("ja", "Japanese", is_generated=False)],
+            tracks=[CaptionTrack(language_code="ja", language_name="Japanese", is_generated=False)],
             captions={"ja": "lyrics"},
         ),
         ai_client=FakeAiClient(),
@@ -208,7 +208,7 @@ async def test_pipeline_renders_namuwiki_markup() -> None:
 async def test_pipeline_saves_transformed_lyrics(tmp_path: Path) -> None:
     pipeline = LyricsPipeline(
         caption_client=FakeCaptionClient(
-            tracks=[CaptionTrack("ja", "Japanese", is_generated=False)],
+            tracks=[CaptionTrack(language_code="ja", language_name="Japanese", is_generated=False)],
             captions={"ja": "lyrics"},
         ),
         ai_client=FakeAiClient(),

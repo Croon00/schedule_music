@@ -49,7 +49,7 @@ class Artist(BaseModel):
 
 
 class SourceCreate(BaseModel):
-    """아티스트에 새 출처를 추가할 때 받는 입력값입니다."""
+    """아티스트에 출처를 추가할 때 받는 입력값입니다."""
 
     source_type: SourceType
     value: str = Field(min_length=1, max_length=500)
@@ -77,7 +77,7 @@ class Source(BaseModel):
 
 
 class ArtistWithSources(Artist):
-    """아티스트 기본 정보에 연결된 출처 목록을 포함한 응답 모델입니다."""
+    """아티스트 기본 정보와 연결된 출처 목록을 포함한 응답 모델입니다."""
 
     sources: list[Source]
 
