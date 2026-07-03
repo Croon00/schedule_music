@@ -53,6 +53,7 @@ LYRICS_SAMPLE_MAX_CHARS = 15000
 LYRICS_SAMPLE_MAX_LINES = 15000
 LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
+SONG_EXPORT_DIR = Path("exports") / "songs"
 NAMUWIKI_FIELD_MAX_CHARS = 500
 LyricsSourceMode = Literal["description", "comment", "caption", "audio"]
 
@@ -287,6 +288,18 @@ def _namuwiki_article_path(title: str, discord_user_id: str) -> Path:
     return NAMUWIKI_EXPORT_DIR / f"{safe_title}_{discord_user_id}_{timestamp}.txt"
 
 
+def _song_lyrics_export_path(
+    song_id: int,
+    title: str,
+    discord_user_id: str,
+    part: str | None = None,
+) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    safe_title = "".join(ch if ch.isalnum() else "_" for ch in title).strip("_") or "song"
+    part_suffix = f"_{part}" if part else ""
+    return SONG_EXPORT_DIR / f"song_{song_id}_{safe_title}{part_suffix}_{discord_user_id}_{timestamp}.txt"
+
+
 def _template_text_from_inputs(
     template_text: str | None,
     template_file_text: str | None,
@@ -353,6 +366,16 @@ async def _collect_raw_lyrics_for_namuwiki(
         language_code=language_code,
         source_mode=source_mode,
     )
+
+
+async def _fetch_text_attachment_text(attachment: discord.Attachment | None, label: str) -> str | None:
+    if attachment is None:
+        return None
+    raw = await attachment.read()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{label} 파일은 UTF-8 txt 파일이어야 합니다.") from exc
 
 
 def _create_artist(
@@ -523,6 +546,235 @@ def _save_song_with_lyrics(
         )
         conn.commit()
         return int(song_id)
+
+
+def _song_select_columns() -> str:
+    return """
+        s.id,
+        s.original_title,
+        s.title_ko,
+        s.artist_name,
+        s.artist_name_ko,
+        s.album_name,
+        s.release_date,
+        s.language_code,
+        s.duration_ms,
+        s.youtube_url,
+        s.youtube_video_id,
+        s.spotify_url,
+        s.cover_image_url,
+        s.created_at,
+        s.updated_at,
+        l.original_lyrics,
+        l.translation_ko,
+        l.pronunciation_ko,
+        l.lyrics_source_type,
+        l.lyrics_source_url,
+        l.translation_model,
+        l.needs_review,
+        l.review_notes,
+        l.reviewed_at
+    """
+
+
+def _find_songs(discord_user_id: str, artist: str, title: str, limit: int = 5) -> list[dict]:
+    artist_query = artist.strip()
+    title_query = title.strip()
+    if not artist_query or not title_query:
+        raise ValueError("artist와 title을 모두 입력해야 합니다.")
+
+    exact_sql = f"""
+        SELECT {_song_select_columns()}
+        FROM songs s
+        JOIN song_lyrics l ON l.song_id = s.id
+        WHERE s.discord_user_id = %s
+          AND (
+            lower(s.artist_name) = lower(%s)
+            OR lower(coalesce(s.artist_name_ko, '')) = lower(%s)
+          )
+          AND (
+            lower(s.original_title) = lower(%s)
+            OR lower(coalesce(s.title_ko, '')) = lower(%s)
+          )
+        ORDER BY s.updated_at DESC
+        LIMIT %s
+    """
+    fuzzy_sql = f"""
+        SELECT {_song_select_columns()}
+        FROM songs s
+        JOIN song_lyrics l ON l.song_id = s.id
+        WHERE s.discord_user_id = %s
+          AND (
+            s.artist_name ILIKE %s
+            OR coalesce(s.artist_name_ko, '') ILIKE %s
+          )
+          AND (
+            s.original_title ILIKE %s
+            OR coalesce(s.title_ko, '') ILIKE %s
+          )
+        ORDER BY s.updated_at DESC
+        LIMIT %s
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            exact_sql,
+            (discord_user_id, artist_query, artist_query, title_query, title_query, limit),
+        ).fetchall()
+        if rows:
+            return [dict(row) for row in rows]
+
+        artist_like = f"%{artist_query}%"
+        title_like = f"%{title_query}%"
+        rows = conn.execute(
+            fuzzy_sql,
+            (discord_user_id, artist_like, artist_like, title_like, title_like, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def _get_song_by_id(discord_user_id: str, song_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            f"""
+            SELECT {_song_select_columns()}
+            FROM songs s
+            JOIN song_lyrics l ON l.song_id = s.id
+            WHERE s.discord_user_id = %s AND s.id = %s
+            """,
+            (discord_user_id, song_id),
+        ).fetchone()
+        return row_to_dict(row)
+
+
+def _format_song_summary(song: dict) -> str:
+    title_ko = f" / {song['title_ko']}" if song.get("title_ko") else ""
+    artist_ko = f" / {song['artist_name_ko']}" if song.get("artist_name_ko") else ""
+    album = song.get("album_name") or "-"
+    release_date = song.get("release_date") or "-"
+    spotify_url = song.get("spotify_url") or "-"
+    review = "필요" if song.get("needs_review") else "완료"
+    return "\n".join(
+        [
+            f"song #{song['id']}",
+            f"제목: {song['original_title']}{title_ko}",
+            f"아티스트: {song['artist_name']}{artist_ko}",
+            f"앨범: {album}",
+            f"발매일: {release_date}",
+            f"YouTube: {song['youtube_url']}",
+            f"Spotify: {spotify_url}",
+            f"가사 출처: `{song['lyrics_source_type']}` / 검토: `{review}`",
+        ]
+    )
+
+
+def _format_song_candidates(songs: list[dict]) -> str:
+    lines = ["여러 곡이 검색되었습니다. 정확한 곡은 `/song_show_by_id`로 확인해주세요."]
+    for song in songs:
+        title_ko = f" / {song['title_ko']}" if song.get("title_ko") else ""
+        artist_ko = f" / {song['artist_name_ko']}" if song.get("artist_name_ko") else ""
+        lines.append(f"#{song['id']} {song['artist_name']}{artist_ko} - {song['original_title']}{title_ko}")
+    return "\n".join(lines)
+
+
+def _song_lyrics_export_text(song: dict) -> str:
+    sections = [
+        _format_song_summary(song),
+        "",
+        "## 원본 가사",
+        "",
+        song["original_lyrics"],
+        "",
+        "## 한국어 번역",
+        "",
+        song["translation_ko"],
+        "",
+        "## 한국어 발음",
+        "",
+        song["pronunciation_ko"],
+    ]
+    if song.get("review_notes"):
+        sections.extend(["", "## 수정 메모", "", song["review_notes"]])
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def _song_separate_lyrics_files(song: dict, discord_user_id: str) -> list[discord.File]:
+    exports = [
+        ("original_lyrics", "original_lyrics", song["original_lyrics"]),
+        ("translation_ko", "translation_ko", song["translation_ko"]),
+        ("pronunciation_ko", "pronunciation_ko", song["pronunciation_ko"]),
+    ]
+    files = []
+    for part, filename_part, text in exports:
+        output_path = _song_lyrics_export_path(
+            song["id"],
+            song["original_title"],
+            discord_user_id,
+            part=filename_part,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text.rstrip() + "\n", encoding="utf-8")
+        files.append(discord.File(output_path, filename=f"song_{song['id']}_{part}.txt"))
+    return files
+
+
+def _update_song_lyrics(
+    *,
+    discord_user_id: str,
+    song_id: int,
+    original_lyrics: str | None,
+    translation_ko: str | None,
+    pronunciation_ko: str | None,
+    review_notes: str | None,
+) -> dict:
+    updates = {
+        "original_lyrics": original_lyrics.strip() if original_lyrics and original_lyrics.strip() else None,
+        "translation_ko": translation_ko.strip() if translation_ko and translation_ko.strip() else None,
+        "pronunciation_ko": pronunciation_ko.strip() if pronunciation_ko and pronunciation_ko.strip() else None,
+        "review_notes": review_notes.strip() if review_notes and review_notes.strip() else None,
+    }
+    if not any(updates.values()):
+        raise ValueError("수정할 가사/번역/발음/메모 중 하나는 입력해야 합니다.")
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT l.song_id
+            FROM song_lyrics l
+            JOIN songs s ON s.id = l.song_id
+            WHERE s.discord_user_id = %s AND s.id = %s
+            """,
+            (discord_user_id, song_id),
+        ).fetchone()
+        if not existing:
+            raise LookupError(f"song #{song_id}를 찾을 수 없습니다.")
+
+        conn.execute(
+            """
+            UPDATE song_lyrics
+            SET
+                original_lyrics = COALESCE(%s, original_lyrics),
+                translation_ko = COALESCE(%s, translation_ko),
+                pronunciation_ko = COALESCE(%s, pronunciation_ko),
+                review_notes = COALESCE(%s, review_notes),
+                needs_review = FALSE,
+                reviewed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE song_id = %s
+            """,
+            (
+                updates["original_lyrics"],
+                updates["translation_ko"],
+                updates["pronunciation_ko"],
+                updates["review_notes"],
+                song_id,
+            ),
+        )
+        conn.commit()
+
+    updated = _get_song_by_id(discord_user_id, song_id)
+    if not updated:
+        raise LookupError(f"song #{song_id}를 찾을 수 없습니다.")
+    return updated
 
 
 class ScheduleMusicBot(discord.Client):
@@ -752,7 +1004,11 @@ async def song_save(
             title=title,
         )
 
-        spotify = await search_spotify_track(artist, title) if spotify_configured() else None
+        try:
+            spotify = await search_spotify_track(artist, title) if spotify_configured() else None
+        except Exception:
+            logger.exception("Spotify 검색에 실패했습니다. Spotify 정보 없이 곡을 저장합니다.")
+            spotify = None
         song_id = _save_song_with_lyrics(
             discord_user_id=str(interaction.user.id),
             youtube_url=youtube_url,
@@ -790,6 +1046,162 @@ async def song_save(
             f"가사 출처: `{raw.source_type}` / 언어: `{raw.language_code or language_code}`\n"
             f"{spotify_line}"
         ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="song_show", description="저장된 곡을 아티스트와 제목으로 조회합니다.")
+@app_commands.describe(
+    artist="아티스트 이름입니다. 원본 이름과 한글 이름 모두 검색합니다.",
+    title="곡 제목입니다. 원본 제목과 한글 제목 모두 검색합니다.",
+    include_lyrics="True이면 원본 가사, 번역, 발음을 txt 파일로 함께 받습니다.",
+    separate_lyrics="True이면 원본 가사, 번역, 발음을 각각 별도 txt 파일로 받습니다.",
+)
+async def song_show(
+    interaction: discord.Interaction,
+    artist: str,
+    title: str,
+    include_lyrics: bool = False,
+    separate_lyrics: bool = False,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    if not settings.database_url:
+        await interaction.followup.send("DATABASE_URL이 설정되어 있어야 조회할 수 있습니다.", ephemeral=True)
+        return
+
+    try:
+        songs = _find_songs(str(interaction.user.id), artist, title)
+    except Exception as exc:
+        logger.exception("곡 조회 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"곡 조회에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    if not songs:
+        await interaction.followup.send("검색된 곡이 없습니다. 원본 제목이나 한글 제목으로 다시 시도해주세요.", ephemeral=True)
+        return
+    if len(songs) > 1:
+        await interaction.followup.send(_format_song_candidates(songs), ephemeral=True)
+        return
+
+    song = songs[0]
+    if include_lyrics:
+        if separate_lyrics:
+            await interaction.followup.send(
+                _format_song_summary(song),
+                files=_song_separate_lyrics_files(song, str(interaction.user.id)),
+                ephemeral=True,
+            )
+            return
+
+        output_path = _song_lyrics_export_path(song["id"], song["original_title"], str(interaction.user.id))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(_song_lyrics_export_text(song), encoding="utf-8")
+        await interaction.followup.send(
+            _format_song_summary(song),
+            file=discord.File(output_path),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.followup.send(_format_song_summary(song), ephemeral=True)
+
+
+@bot.tree.command(name="song_show_by_id", description="저장된 곡을 song id로 정확히 조회합니다.")
+@app_commands.describe(
+    song_id="/song_save 또는 /song_show에서 확인한 song id입니다.",
+    include_lyrics="True이면 원본 가사, 번역, 발음을 txt 파일로 함께 받습니다.",
+    separate_lyrics="True이면 원본 가사, 번역, 발음을 각각 별도 txt 파일로 받습니다.",
+)
+async def song_show_by_id(
+    interaction: discord.Interaction,
+    song_id: int,
+    include_lyrics: bool = False,
+    separate_lyrics: bool = False,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    if not settings.database_url:
+        await interaction.followup.send("DATABASE_URL이 설정되어 있어야 조회할 수 있습니다.", ephemeral=True)
+        return
+
+    song = _get_song_by_id(str(interaction.user.id), song_id)
+    if not song:
+        await interaction.followup.send(f"song #{song_id}를 찾을 수 없습니다.", ephemeral=True)
+        return
+
+    if include_lyrics:
+        if separate_lyrics:
+            await interaction.followup.send(
+                _format_song_summary(song),
+                files=_song_separate_lyrics_files(song, str(interaction.user.id)),
+                ephemeral=True,
+            )
+            return
+
+        output_path = _song_lyrics_export_path(song["id"], song["original_title"], str(interaction.user.id))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(_song_lyrics_export_text(song), encoding="utf-8")
+        await interaction.followup.send(
+            _format_song_summary(song),
+            file=discord.File(output_path),
+            ephemeral=True,
+        )
+        return
+
+    await interaction.followup.send(_format_song_summary(song), ephemeral=True)
+
+
+@bot.tree.command(name="song_lyrics_update", description="저장된 곡의 원본 가사, 번역, 한국어 발음을 수정합니다.")
+@app_commands.describe(
+    song_id="수정할 song id입니다.",
+    original_lyrics_file="새 원본 가사가 들어있는 UTF-8 txt 파일입니다.",
+    translation_ko_file="새 한국어 번역이 들어있는 UTF-8 txt 파일입니다.",
+    pronunciation_ko_file="새 한국어 발음이 들어있는 UTF-8 txt 파일입니다.",
+    original_lyrics="짧은 원본 가사는 직접 입력할 수 있습니다.",
+    translation_ko="짧은 한국어 번역은 직접 입력할 수 있습니다.",
+    pronunciation_ko="짧은 한국어 발음은 직접 입력할 수 있습니다.",
+    review_notes="수정 메모입니다.",
+)
+async def song_lyrics_update(
+    interaction: discord.Interaction,
+    song_id: int,
+    original_lyrics_file: discord.Attachment | None = None,
+    translation_ko_file: discord.Attachment | None = None,
+    pronunciation_ko_file: discord.Attachment | None = None,
+    original_lyrics: str | None = None,
+    translation_ko: str | None = None,
+    pronunciation_ko: str | None = None,
+    review_notes: str | None = None,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    if not settings.database_url:
+        await interaction.followup.send("DATABASE_URL이 설정되어 있어야 수정할 수 있습니다.", ephemeral=True)
+        return
+
+    try:
+        original_from_file = await _fetch_text_attachment_text(original_lyrics_file, "원본 가사")
+        translation_from_file = await _fetch_text_attachment_text(translation_ko_file, "한국어 번역")
+        pronunciation_from_file = await _fetch_text_attachment_text(pronunciation_ko_file, "한국어 발음")
+        updated = _update_song_lyrics(
+            discord_user_id=str(interaction.user.id),
+            song_id=song_id,
+            original_lyrics=original_from_file or original_lyrics,
+            translation_ko=translation_from_file or translation_ko,
+            pronunciation_ko=pronunciation_from_file or pronunciation_ko,
+            review_notes=review_notes,
+        )
+    except LookupError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except ValueError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("곡 가사 수정 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"곡 가사 수정에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    await interaction.followup.send(
+        f"song #{updated['id']} 수정 완료\n{updated['artist_name']} - {updated['original_title']}",
         ephemeral=True,
     )
 

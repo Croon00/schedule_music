@@ -178,6 +178,8 @@ def init_db() -> None:
                 lyrics_source_url TEXT,
                 translation_model TEXT,
                 needs_review BOOLEAN NOT NULL DEFAULT TRUE,
+                review_notes TEXT,
+                reviewed_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE,
@@ -185,6 +187,8 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS review_notes TEXT")
+        conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
         conn.commit()
 
 
