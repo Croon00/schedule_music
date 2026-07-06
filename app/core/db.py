@@ -104,9 +104,30 @@ def init_db() -> None:
                 url TEXT,
                 published_at TIMESTAMPTZ,
                 raw_text TEXT NOT NULL,
+                item_type TEXT,
+                classification_confidence DOUBLE PRECISION,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (source_id) REFERENCES artist_sources(id) ON DELETE SET NULL,
                 UNIQUE (discord_user_id, source_id, external_id)
+            )
+            """
+        )
+        conn.execute("ALTER TABLE source_items ADD COLUMN IF NOT EXISTS item_type TEXT")
+        conn.execute("ALTER TABLE source_items ADD COLUMN IF NOT EXISTS classification_confidence DOUBLE PRECISION")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_routes (
+                id SERIAL PRIMARY KEY,
+                discord_user_id TEXT,
+                guild_id TEXT NOT NULL,
+                source_id INTEGER,
+                item_type TEXT NOT NULL,
+                discord_channel_id TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_id) REFERENCES artist_sources(id) ON DELETE CASCADE,
+                UNIQUE (guild_id, source_id, item_type, discord_channel_id)
             )
             """
         )

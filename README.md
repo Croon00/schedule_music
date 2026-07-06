@@ -1,5 +1,184 @@
 # schedule_music
 
+## Current Usage: X 분류, Discord 라우팅, Google Calendar
+
+이 섹션이 현재 구현 기준의 사용법입니다. 아래쪽의 오래된 MVP 설명보다 이 섹션을 우선해서 보면 됩니다.
+
+현재 흐름:
+
+```text
+Discord에서 아티스트/X 계정 등록
+-> agent가 X 새 게시글 수집
+-> source_items로 중복 제거
+-> LangGraph workflow에서 글 타입 분류
+-> live_event/ticket이면 일정 정보 추출
+-> 개인 Google Calendar에 일정 생성
+-> Discord route 설정에 맞는 서버 채널로 알림 전송
+```
+
+### 글 타입
+
+```text
+notice      일반 공지, 방송, 안내
+release     음원, 앨범, MV 공개
+live_event  라이브, 공연, 페스, 출연
+ticket      티켓, 선행, 일반판매, 추첨, 응모, 마감
+merch       굿즈, 상품, 예약판매, 특전
+irrelevant  알림이 필요 없는 글
+```
+
+### Discord 알림 route
+
+Discord 채널 알림은 서버별로 저장됩니다.
+
+```text
+guild_id + source_id + item_type -> discord_channel_id
+```
+
+즉 같은 RKMusic X 계정이라도 서버마다 다른 채널로 보낼 수 있습니다.
+
+```text
+A 서버: RKMusic notice -> #rk공지
+B 서버: RKMusic notice -> #jpop-news
+```
+
+### Google Calendar 연동
+
+Google Calendar는 서버 공용이 아니라 Discord 사용자별 개인 OAuth 연결입니다.
+
+현재 동작은 다음 기준입니다.
+
+```text
+사용자 A가 /google_connect 완료
+사용자 A가 /artist_add로 X 계정 등록
+agent가 해당 X 계정에서 live_event/ticket 감지
+-> 사용자 A의 Google Calendar에 일정 생성
+```
+
+서버 채널 알림은 여러 서버 route로 보낼 수 있지만, 캘린더는 각 사용자가 자기 Google 계정을 직접 연결해야 합니다.
+
+여러 사람이 같은 소스를 구독해서 각자 캘린더에 넣는 구조는 아직 별도 구독 테이블이 필요합니다.
+
+### Discord 명령어
+
+아티스트/X 계정 등록:
+
+```text
+/artist_add name:RKMusic x_username:RKMusic_inc
+/artist_add name:KAMITSUBAKI x_username:kamitsubaki_jp
+```
+
+등록 목록:
+
+```text
+/artist_list
+```
+
+라우팅에 사용할 source id 확인:
+
+```text
+/source_list
+```
+
+Discord 채널 route 설정:
+
+```text
+/route_add source_id:3 item_type:notice channel:#공지
+/route_add source_id:3 item_type:release channel:#릴리즈
+/route_add source_id:3 item_type:live_event channel:#라이브
+/route_add source_id:3 item_type:ticket channel:#티켓
+/route_add source_id:3 item_type:merch channel:#굿즈
+```
+
+`source_id`를 비우면 해당 서버의 전체 기본 route로 저장됩니다.
+
+```text
+/route_add item_type:notice channel:#전체공지
+```
+
+route 확인/삭제/테스트:
+
+```text
+/route_list
+/route_list source_id:3
+/route_delete route_id:5
+/route_test route_id:5
+```
+
+개인 Google Calendar 연결:
+
+```text
+/google_connect
+```
+
+### 환경변수
+
+필수/주요 설정:
+
+```text
+DATABASE_URL=postgresql://...
+DATABASE_AUTO_INIT=true
+
+DISCORD_BOT_TOKEN=...
+DISCORD_GUILD_ID=
+
+X_BEARER_TOKEN=...
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
+
+AGENT_ENABLED=true
+AGENT_RUN_ON_START=true
+AGENT_INTERVAL_SECONDS=600
+
+PUBLIC_BASE_URL=https://your-app.example.com
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://your-app.example.com/auth/google/callback
+GOOGLE_CALENDAR_ID=primary
+```
+
+### 실행
+
+API만 실행:
+
+```powershell
+uvicorn app.api.main:app --reload
+```
+
+API, Discord 봇, agent loop 함께 실행:
+
+```powershell
+python -m app.runtime
+```
+
+### LangGraph 사용 위치
+
+LangGraph는 X 수집 자체가 아니라, 수집된 게시글 하나를 어떻게 처리할지 결정하는 workflow에 사용합니다.
+
+```text
+START
+-> classify_item
+-> live_event/ticket이면 extract_event
+-> END
+```
+
+구현 위치:
+
+```text
+app/agents/music_graph.py
+```
+
+`langgraph`가 설치되어 있으면 실제 LangGraph workflow로 실행하고, 설치되어 있지 않아도 같은 node 순서로 fallback 실행합니다.
+
+### 주의사항
+
+- X 게시글 수집은 실시간 push가 아니라 agent 주기 실행입니다.
+- `AGENT_INTERVAL_SECONDS`가 짧을수록 더 자주 확인하지만 X API 제한을 더 빨리 씁니다.
+- route가 없으면 Discord 알림은 보내지 않습니다.
+- 봇이 Discord에 로그인되어 있지 않으면 agent가 알림 전송을 건너뜁니다.
+- Google Calendar는 사용자별 연결입니다.
+- 자동 구매, 자동 응모, CAPTCHA 우회, 결제 자동화는 구현하지 않습니다.
+
 JPOP 아티스트의 공연, 티켓, 이벤트 일정을 수집하고 관리하기 위한 MVP 백엔드입니다.
 
 현재 버전은 아티스트, X 계정, 공식 사이트, 티켓 사이트 같은 출처를 저장하고,

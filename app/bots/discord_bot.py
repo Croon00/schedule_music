@@ -18,6 +18,14 @@ from app.integrations.google_calendar import (
     google_connected,
     google_oauth_configured,
 )
+from app.integrations.notifications import (
+    NotificationRouteConflictError,
+    NotificationRouteNotFoundError,
+    create_notification_route,
+    delete_notification_route,
+    get_notification_route,
+    list_notification_routes,
+)
 from app.integrations.spotify import SpotifyTrackInfo, search_spotify_track, spotify_configured
 from app.integrations.youtube_context import (
     extract_lyrics_candidate,
@@ -446,6 +454,55 @@ def _list_artists(discord_user_id: str) -> list[dict]:
         ).fetchall()
 
 
+def _list_sources_for_user(discord_user_id: str) -> list[dict]:
+    """현재 Discord 사용자가 등록한 아티스트 소스와 source_id를 조회합니다."""
+    with get_connection() as conn:
+        return conn.execute(
+            """
+            SELECT
+                s.id,
+                s.source_type,
+                s.label,
+                s.value,
+                s.is_active,
+                a.name AS artist_name,
+                a.display_name
+            FROM artist_sources s
+            JOIN artists a ON a.id = s.artist_id
+            WHERE a.discord_user_id = %s
+            ORDER BY a.name, s.source_type, s.value
+            LIMIT 50
+            """,
+            (discord_user_id,),
+        ).fetchall()
+
+
+def _format_route(route: dict) -> str:
+    """Discord route 한 줄을 사람이 읽기 쉬운 형태로 바꿉니다."""
+    source = route.get("source_value") or "전체 소스"
+    artist = route.get("artist_name")
+    artist_prefix = f"{artist} / " if artist else ""
+    active_suffix = "" if route.get("is_active", True) else " (비활성)"
+    return (
+        f"#{route['id']} `{route['item_type']}` "
+        f"{artist_prefix}{source} -> <#{route['discord_channel_id']}>{active_suffix}"
+    )
+
+
+def _guild_id_from_interaction(interaction: discord.Interaction) -> str:
+    """라우팅 명령어가 DM이 아니라 서버에서 실행됐는지 확인합니다."""
+    if interaction.guild_id is None:
+        raise ValueError("라우팅 설정은 Discord 서버 안에서만 사용할 수 있습니다.")
+    return str(interaction.guild_id)
+
+
+def _ensure_manage_guild(interaction: discord.Interaction) -> None:
+    """서버 라우팅 설정은 서버 관리 권한이 있는 사용자만 변경하게 합니다."""
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if permissions is None or not permissions.manage_guild:
+        raise PermissionError("서버 관리 권한이 있는 사용자만 라우팅을 설정할 수 있습니다.")
+
+
 def _save_song_with_lyrics(
     *,
     discord_user_id: str,
@@ -861,6 +918,146 @@ async def artist_delete(interaction: discord.Interaction, artist_id: int) -> Non
         await interaction.followup.send(f"아티스트 #{artist_id}를 삭제했습니다.", ephemeral=True)
     else:
         await interaction.followup.send(f"아티스트 #{artist_id}를 찾을 수 없습니다.", ephemeral=True)
+
+
+@bot.tree.command(name="source_list", description="라우팅에 사용할 source_id 목록을 보여줍니다.")
+async def source_list(interaction: discord.Interaction) -> None:
+    """현재 사용자가 등록한 감시 소스 목록을 보여줍니다."""
+    await interaction.response.defer(ephemeral=True)
+    if not settings.database_url:
+        await interaction.followup.send("DATABASE_URL이 설정되어 있어야 조회할 수 있습니다.", ephemeral=True)
+        return
+
+    sources = _list_sources_for_user(str(interaction.user.id))
+    if not sources:
+        await interaction.followup.send("등록된 소스가 없습니다. 먼저 /artist_add로 X 계정을 등록해주세요.", ephemeral=True)
+        return
+
+    lines = []
+    for source in sources:
+        artist = source["display_name"] or source["artist_name"]
+        label = f" ({source['label']})" if source["label"] else ""
+        active = "" if source["is_active"] else " 비활성"
+        lines.append(
+            f"#{source['id']} {artist} / `{source['source_type']}` {source['value']}{label}{active}"
+        )
+
+    await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+
+@bot.tree.command(name="route_add", description="소스/글 타입별 Discord 알림 채널을 연결합니다.")
+@app_commands.describe(
+    item_type="notice, release, live_event, ticket, merch 중 하나",
+    channel="알림을 보낼 Discord 채널",
+    source_id="/source_list에서 확인한 source_id. 비우면 서버 전체 기본 route로 사용합니다.",
+)
+@app_commands.choices(
+    item_type=[
+        app_commands.Choice(name="notice 일반 공지", value="notice"),
+        app_commands.Choice(name="release 음원/MV 릴리즈", value="release"),
+        app_commands.Choice(name="live_event 라이브/공연", value="live_event"),
+        app_commands.Choice(name="ticket 티켓/응모", value="ticket"),
+        app_commands.Choice(name="merch 굿즈/상품", value="merch"),
+    ]
+)
+async def route_add(
+    interaction: discord.Interaction,
+    item_type: str,
+    channel: discord.TextChannel,
+    source_id: int | None = None,
+) -> None:
+    """분류된 글 타입을 현재 Discord 서버의 특정 채널로 보내도록 설정합니다."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        guild_id = _guild_id_from_interaction(interaction)
+        route = create_notification_route(
+            discord_user_id=str(interaction.user.id),
+            guild_id=guild_id,
+            source_id=source_id,
+            item_type=item_type,
+            discord_channel_id=str(channel.id),
+        )
+    except (PermissionError, ValueError, LookupError, NotificationRouteConflictError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("route_add 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"라우팅 저장에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    await interaction.followup.send(f"라우팅 추가 완료: {_format_route(route)}", ephemeral=True)
+
+
+@bot.tree.command(name="route_list", description="현재 서버의 Discord 알림 라우팅 목록을 보여줍니다.")
+@app_commands.describe(source_id="선택: 특정 source_id만 조회합니다.")
+async def route_list(interaction: discord.Interaction, source_id: int | None = None) -> None:
+    """현재 서버에 설정된 source/type -> channel 라우팅 목록을 보여줍니다."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        guild_id = _guild_id_from_interaction(interaction)
+        routes = list_notification_routes(guild_id=guild_id, source_id=source_id)
+    except ValueError as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("route_list 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"라우팅 조회에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    if not routes:
+        await interaction.followup.send("등록된 라우팅이 없습니다.", ephemeral=True)
+        return
+
+    await interaction.followup.send("\n".join(_format_route(route) for route in routes), ephemeral=True)
+
+
+@bot.tree.command(name="route_delete", description="route_id로 Discord 알림 라우팅을 삭제합니다.")
+@app_commands.describe(route_id="/route_list에 표시된 route id")
+async def route_delete(interaction: discord.Interaction, route_id: int) -> None:
+    """현재 서버의 라우팅 하나를 삭제합니다."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        guild_id = _guild_id_from_interaction(interaction)
+        deleted = delete_notification_route(guild_id=guild_id, route_id=route_id)
+    except (PermissionError, ValueError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("route_delete 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"라우팅 삭제에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    if deleted:
+        await interaction.followup.send(f"route #{route_id}를 삭제했습니다.", ephemeral=True)
+    else:
+        await interaction.followup.send(f"route #{route_id}를 찾을 수 없습니다.", ephemeral=True)
+
+
+@bot.tree.command(name="route_test", description="설정한 라우팅 채널에 테스트 메시지를 보냅니다.")
+@app_commands.describe(route_id="/route_list에 표시된 route id")
+async def route_test(interaction: discord.Interaction, route_id: int) -> None:
+    """라우팅이 실제 Discord 채널로 전송 가능한지 확인합니다."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        guild_id = _guild_id_from_interaction(interaction)
+        route = get_notification_route(guild_id=guild_id, route_id=route_id)
+        channel = bot.get_channel(int(route["discord_channel_id"]))
+        if channel is None or not hasattr(channel, "send"):
+            await interaction.followup.send("채널을 찾을 수 없습니다. 봇 권한과 채널 설정을 확인해주세요.", ephemeral=True)
+            return
+        await channel.send(f"라우팅 테스트: {_format_route(route)}")
+    except (PermissionError, ValueError, NotificationRouteNotFoundError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("route_test 명령 처리에 실패했습니다.")
+        await interaction.followup.send(f"라우팅 테스트에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    await interaction.followup.send("테스트 메시지를 전송했습니다.", ephemeral=True)
 
 
 @bot.tree.command(name="google_connect", description="Google Calendar를 연결합니다.")
