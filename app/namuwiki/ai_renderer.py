@@ -4,6 +4,10 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.namuwiki.models import NamuWikiTemplateSongArticleRequest
+from app.namuwiki.template_renderer import (
+    has_placeholders,
+    render_song_article_from_placeholders,
+)
 
 
 class NamuWikiAiRenderError(RuntimeError):
@@ -13,6 +17,9 @@ class NamuWikiAiRenderError(RuntimeError):
 async def render_song_article_from_template(
     payload: NamuWikiTemplateSongArticleRequest,
 ) -> str:
+    if has_placeholders(payload.template_example):
+        return render_song_article_from_placeholders(payload.template_example, payload.song)
+
     if not settings.openai_api_key:
         raise NamuWikiAiRenderError("OPENAI_API_KEY is required.")
 

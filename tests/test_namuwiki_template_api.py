@@ -37,9 +37,85 @@ def test_template_article_requires_openai_key() -> None:
     assert response.json()["detail"] == "OPENAI_API_KEY is required."
 
 
-def test_saved_template_can_be_created_listed_and_read() -> None:
+def test_placeholder_template_renders_without_openai_key() -> None:
+    original_key = settings.openai_api_key
+    settings.openai_api_key = None
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/namuwiki/song-article/from-template",
+                json={
+                    "template_example": (
+                        "{{categories}}\n"
+                        "|| 제목 || {{title}} ||\n"
+                        "|| 가수 || [[{{artist}}]] ||\n"
+                        "|| 작사 || {{lyricist}} ||\n"
+                        "{{extra_credits}}\n"
+                        "== 가사 ==\n"
+                        "{{lyrics}}"
+                    ),
+                    "song": {
+                        "title": "Song",
+                        "artist": "Artist",
+                        "categories": ["일본 노래"],
+                        "lyricist": "Lyricist",
+                        "illustrator": "Illustrator",
+                        "lyrics": [
+                            {
+                                "original": "原文",
+                                "pronunciation_ko": "발음",
+                                "translation_ko": "번역",
+                            }
+                        ],
+                    },
+                },
+            )
+    finally:
+        settings.openai_api_key = original_key
+
+    assert response.status_code == 200
+    assert response.json()["text"] == (
+        "[[분류:일본 노래]]\n"
+        "|| 제목 || Song ||\n"
+        "|| 가수 || [[Artist]] ||\n"
+        "|| 작사 || Lyricist ||\n"
+        "|| '''일러스트''' ||||Illustrator ||\n"
+        "== 가사 ==\n"
+        "'''原文'''\n"
+        "{{{#b1b1b1,#7f7f7f 발음}}}\n"
+        "{{{#b1b1b1,#7f7f7f 번역}}}\n"
+    )
+
+
+def test_placeholder_template_can_include_video_section() -> None:
+    original_key = settings.openai_api_key
+    settings.openai_api_key = None
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/namuwiki/song-article/from-template",
+                json={
+                    "template_example": "before\n{{video_section}}\nafter",
+                    "song": {
+                        "title": "Song",
+                        "artist": "Artist",
+                        "youtube_url": "https://www.youtube.com/watch?v=c7m6kAGEw3U",
+                    },
+                },
+            )
+    finally:
+        settings.openai_api_key = original_key
+
+    assert response.status_code == 200
+    assert "before\n== " in response.json()["text"]
+    assert "[youtube(c7m6kAGEw3U)]" in response.json()["text"]
+    assert "'''MV'''" in response.json()["text"]
+    assert response.json()["text"].endswith("\nafter\n")
+
+
+def test_saved_template_can_be_created_listed_and_read(tmp_path: Path) -> None:
     original_dir = template_store.TEMPLATE_DIR
-    test_dir = Path("data") / "test_namuwiki_templates"
+    test_dir = tmp_path / "namuwiki_templates"
     shutil.rmtree(test_dir, ignore_errors=True)
     template_store.TEMPLATE_DIR = test_dir
     try:
@@ -73,10 +149,10 @@ def test_saved_template_can_be_created_listed_and_read() -> None:
     assert detail.json()["template_example"] == "[[category:music]]\n== overview ==\nexample"
 
 
-def test_saved_template_render_requires_openai_key() -> None:
+def test_saved_template_render_requires_openai_key(tmp_path: Path) -> None:
     original_dir = template_store.TEMPLATE_DIR
     original_key = settings.openai_api_key
-    test_dir = Path("data") / "test_namuwiki_templates"
+    test_dir = tmp_path / "namuwiki_templates"
     shutil.rmtree(test_dir, ignore_errors=True)
     template_store.TEMPLATE_DIR = test_dir
     settings.openai_api_key = None
