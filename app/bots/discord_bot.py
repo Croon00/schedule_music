@@ -43,6 +43,7 @@ from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
 from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
 from app.namuwiki.models import (
+    NamuWikiCredit,
     NamuWikiLyricLine,
     NamuWikiSongArticleRequest,
     NamuWikiTemplateCreate,
@@ -351,6 +352,37 @@ def _build_lyric_lines(
             )
         )
     return lines
+
+
+def _parse_namuwiki_extra_credits(value: str | None) -> list[NamuWikiCredit]:
+    if not value or not value.strip():
+        return []
+
+    credits: list[NamuWikiCredit] = []
+    raw_parts = value.replace("\n", ";").split(";")
+    for raw_part in raw_parts:
+        part = raw_part.strip()
+        if not part:
+            continue
+
+        separator = "=" if "=" in part else ":" if ":" in part else None
+        if separator is None:
+            raise ValueError("extra_credits must use 'role=name' entries separated by ';'.")
+
+        role, raw_name = (piece.strip() for piece in part.split(separator, 1))
+        if not role or not raw_name:
+            raise ValueError("extra_credits entries need both role and name.")
+
+        name, _, name_ko = raw_name.partition("|")
+        credits.append(
+            NamuWikiCredit(
+                role=role,
+                name=name.strip(),
+                name_ko=name_ko.strip() or None,
+            )
+        )
+
+    return credits
 
 
 async def _fetch_template_attachment_text(template_file: discord.Attachment | None) -> str | None:
@@ -1482,6 +1514,16 @@ async def namuwiki_render(
     youtube_url: str,
     release_date: str | None = None,
     album: str | None = None,
+    lyricist: str | None = None,
+    composer: str | None = None,
+    arranger: str | None = None,
+    illustrator: str | None = None,
+    video_credit: str | None = None,
+    producer: str | None = None,
+    executive_producer: str | None = None,
+    recording_director: str | None = None,
+    recording_mixing: str | None = None,
+    extra_credits: str | None = None,
     language_code: str = "ja",
     source_mode: LyricsSourceMode = "caption",
     extra_instruction: str | None = None,
@@ -1510,6 +1552,16 @@ async def namuwiki_render(
             artist=artist,
             release_date=release_date,
             album=album,
+            lyricist=lyricist,
+            composer=composer,
+            arranger=arranger,
+            illustrator=illustrator,
+            video=video_credit,
+            producer=producer,
+            executive_producer=executive_producer,
+            recording_director=recording_director,
+            recording_mixing=recording_mixing,
+            extra_credits=_parse_namuwiki_extra_credits(extra_credits),
             youtube_url=youtube_url,
             lyrics=_build_lyric_lines(raw.text, pronunciation_ko, translation_ko),
         )

@@ -60,3 +60,35 @@ def test_render_song_article_in_namuwiki_markup() -> None:
     assert "'''重なる傷痕　逃げ惑う影'''" in text
     assert "{{{#b1b1b1,#7f7f7f 카사나루 키즈아토 니게마토우 카게}}}" in text
     assert text.endswith("[br] ||\n")
+
+
+def test_render_song_article_with_optional_credit_fields() -> None:
+    text = render_song_article(
+        NamuWikiSongArticleRequest(
+            title="Song",
+            artist="Artist",
+            lyricist="Lyricist",
+            composer="Composer",
+            arranger="Arranger",
+            illustrator="Illustrator",
+            video="Video Team",
+            producer="Producer",
+            executive_producer="Executive Producer",
+            recording_director="Recording Director",
+            recording_mixing="Recording Mixer",
+            extra_credits=[
+                NamuWikiCredit(role="Guitar", name="Guitarist", name_ko="기타리스트"),
+            ],
+        )
+    )
+
+    assert "'''작사''' ||||Lyricist" in text
+    assert "'''작곡''' ||||Composer" in text
+    assert "'''편곡''' ||||Arranger" in text
+    assert "'''일러스트''' ||||<width=300>Illustrator" in text
+    assert "'''영상''' ||||<width=300>Video Team" in text
+    assert "'''프로듀서''' ||||<width=300>Producer" in text
+    assert "'''제작 총괄''' ||||<width=300>Executive Producer" in text
+    assert "'''레코딩 총괄''' ||||<width=300>Recording Director" in text
+    assert "'''레코딩 & 믹싱''' ||||<width=300>Recording Mixer" in text
+    assert "'''Guitar''' ||||<width=300>Guitarist {{{-5 | 기타리스트}}}" in text

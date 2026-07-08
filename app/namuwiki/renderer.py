@@ -67,8 +67,9 @@ def _render_infobox(payload: NamuWikiSongArticleRequest) -> str:
         rows.append(f"|| '''작곡''' ||||{_render_name(payload.composer, payload.composer_ko)} ||")
     if payload.arranger:
         rows.append(f"|| '''편곡''' ||||{_render_name(payload.arranger, payload.arranger_ko)} ||")
-    if payload.extra_credits:
-        rows.append(_render_extra_credits(payload.extra_credits))
+    extra_credits = _collect_extra_credits(payload)
+    if extra_credits:
+        rows.append(_render_extra_credits(extra_credits))
     if payload.external_links:
         rows.append("||<-2> '''외부 링크''' ||||||")
         rows.append(
@@ -83,6 +84,23 @@ def _render_name(name: str, name_ko: str | None) -> str:
     if not name_ko:
         return name
     return f"{name} {{{{{{-5 | {name_ko}}}}}}}"
+
+
+def _collect_extra_credits(payload: NamuWikiSongArticleRequest) -> list[NamuWikiCredit]:
+    credits: list[NamuWikiCredit] = []
+    fields = [
+        ("일러스트", payload.illustrator, payload.illustrator_ko),
+        ("영상", payload.video, payload.video_ko),
+        ("프로듀서", payload.producer, payload.producer_ko),
+        ("제작 총괄", payload.executive_producer, payload.executive_producer_ko),
+        ("레코딩 총괄", payload.recording_director, payload.recording_director_ko),
+        ("레코딩 & 믹싱", payload.recording_mixing, payload.recording_mixing_ko),
+    ]
+    for role, name, name_ko in fields:
+        if name and name.strip():
+            credits.append(NamuWikiCredit(role=role, name=name.strip(), name_ko=name_ko))
+    credits.extend(payload.extra_credits)
+    return credits
 
 
 def _render_extra_credits(credits: list[NamuWikiCredit]) -> str:
