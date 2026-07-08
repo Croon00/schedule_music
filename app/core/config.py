@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-mini"
     openai_audio_model: str = "whisper-1"
     lyrics_audio_fallback_max_seconds: int = 500
+    lyrics_audio_direct_download: bool = True
+    openai_audio_max_upload_mb: int = 24
     youtube_transcript_proxy_http_url: str | None = None
     youtube_transcript_proxy_https_url: str | None = None
     webshare_proxy_username: str | None = None

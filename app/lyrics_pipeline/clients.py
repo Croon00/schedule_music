@@ -154,14 +154,73 @@ class YtDlpAudioDownloader:
         *,
         output_dir: str | Path = "exports/audio",
         max_seconds: int | None = None,
+        prefer_direct_download: bool | None = None,
+        max_upload_mb: int | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.max_seconds = max_seconds or settings.lyrics_audio_fallback_max_seconds
+        self.prefer_direct_download = (
+            settings.lyrics_audio_direct_download
+            if prefer_direct_download is None
+            else prefer_direct_download
+        )
+        self.max_upload_bytes = (max_upload_mb or settings.openai_audio_max_upload_mb) * 1024 * 1024
 
     async def download_audio(self, youtube_url: str) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         stem = f"audio_{uuid.uuid4().hex}"
         output_template = str(self.output_dir / f"{stem}.%(ext)s")
+        direct_error: Exception | None = None
+
+        if self.prefer_direct_download:
+            try:
+                direct_path = await self._download_with_command(
+                    self._direct_download_command(output_template, youtube_url),
+                    stem,
+                )
+                if direct_path.stat().st_size <= self.max_upload_bytes:
+                    return direct_path
+                direct_error = RuntimeError(
+                    "Downloaded audio is larger than the OpenAI upload limit "
+                    f"configured for this app ({self.max_upload_bytes // 1024 // 1024} MB)."
+                )
+                direct_path.unlink(missing_ok=True)
+            except Exception as exc:
+                direct_error = exc
+
+        try:
+            return await self._download_with_command(
+                self._ffmpeg_extract_command(output_template, youtube_url),
+                stem,
+            )
+        except Exception as exc:
+            if direct_error:
+                raise RuntimeError(
+                    "Direct audio download failed or was too large, and ffmpeg/mp3 fallback also failed. "
+                    f"Direct error: {direct_error} Fallback error: {exc}"
+                ) from exc
+            raise
+
+    def _direct_download_command(self, output_template: str, youtube_url: str) -> list[str]:
+        command = [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--no-playlist",
+            "--quiet",
+            "--no-warnings",
+            "-f",
+            "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+            "-o",
+            output_template,
+        ]
+        proxy_url = _build_ytdlp_proxy_url()
+        if proxy_url:
+            command.extend(["--proxy", proxy_url])
+        command.append(youtube_url)
+        return command
+
+    def _ffmpeg_extract_command(self, output_template: str, youtube_url: str) -> list[str]:
         command = [
             sys.executable,
             "-m",
@@ -189,7 +248,9 @@ class YtDlpAudioDownloader:
                 ]
             )
         command.append(youtube_url)
+        return command
 
+    async def _download_with_command(self, command: list[str], stem: str) -> Path:
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,

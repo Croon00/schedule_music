@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.lyrics_pipeline.clients import YtDlpAudioDownloader
 from app.lyrics_pipeline.models import CaptionTrack, LyricsInput, LyricsSourceType
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import extract_youtube_video_id, normalize_caption_text
@@ -73,6 +74,25 @@ class FakeAiClient:
         return f"{format_example}\n{artist} - {title}\n{original}\n{translation_ko}\n{pronunciation_ko}"
 
 
+class FakeYtDlpAudioDownloader(YtDlpAudioDownloader):
+    def __init__(self, *, direct_size: int, output_dir: Path, max_upload_mb: int = 1) -> None:
+        super().__init__(
+            output_dir=output_dir,
+            prefer_direct_download=True,
+            max_upload_mb=max_upload_mb,
+        )
+        self.direct_size = direct_size
+        self.commands: list[list[str]] = []
+
+    async def _download_with_command(self, command: list[str], stem: str) -> Path:
+        self.commands.append(command)
+        is_direct = "--extract-audio" not in command
+        extension = "m4a" if is_direct else "mp3"
+        path = self.output_dir / f"{stem}.{extension}"
+        path.write_bytes(b"x" * (self.direct_size if is_direct else 10))
+        return path
+
+
 def test_extract_youtube_video_id_supports_common_urls() -> None:
     assert extract_youtube_video_id("https://youtu.be/abcdefghijk") == "abcdefghijk"
     assert extract_youtube_video_id("https://www.youtube.com/watch?v=abcdefghijk") == "abcdefghijk"
@@ -90,6 +110,46 @@ def test_normalize_caption_text_removes_empty_and_duplicate_lines() -> None:
     )
 
     assert text == "hello world\nsecond line"
+
+
+def test_ytdlp_audio_downloader_direct_command_avoids_ffmpeg_options(tmp_path: Path) -> None:
+    downloader = YtDlpAudioDownloader(output_dir=tmp_path)
+    command = downloader._direct_download_command(
+        str(tmp_path / "audio.%(ext)s"),
+        "https://www.youtube.com/watch?v=abcdefghijk",
+    )
+
+    assert "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best" in command
+    assert "--extract-audio" not in command
+    assert "--audio-format" not in command
+    assert "--download-sections" not in command
+
+
+@pytest.mark.anyio
+async def test_ytdlp_audio_downloader_uses_direct_download_when_small(tmp_path: Path) -> None:
+    downloader = FakeYtDlpAudioDownloader(direct_size=10, output_dir=tmp_path)
+
+    path = await downloader.download_audio("https://www.youtube.com/watch?v=abcdefghijk")
+
+    assert path.suffix == ".m4a"
+    assert len(downloader.commands) == 1
+
+
+@pytest.mark.anyio
+async def test_ytdlp_audio_downloader_falls_back_when_direct_file_is_too_large(
+    tmp_path: Path,
+) -> None:
+    downloader = FakeYtDlpAudioDownloader(
+        direct_size=(2 * 1024 * 1024),
+        output_dir=tmp_path,
+        max_upload_mb=1,
+    )
+
+    path = await downloader.download_audio("https://www.youtube.com/watch?v=abcdefghijk")
+
+    assert path.suffix == ".mp3"
+    assert len(downloader.commands) == 2
+    assert "--extract-audio" in downloader.commands[1]
 
 
 @pytest.mark.anyio
