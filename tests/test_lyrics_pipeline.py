@@ -7,7 +7,11 @@ import pytest
 from app.lyrics_pipeline.clients import YtDlpAudioDownloader
 from app.lyrics_pipeline.models import CaptionTrack, LyricsInput, LyricsSourceType
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
-from app.lyrics_pipeline.youtube import extract_youtube_video_id, normalize_caption_text
+from app.lyrics_pipeline.youtube import (
+    canonical_youtube_watch_url,
+    extract_youtube_video_id,
+    normalize_caption_text,
+)
 
 
 @pytest.fixture
@@ -99,6 +103,12 @@ def test_extract_youtube_video_id_supports_common_urls() -> None:
     assert extract_youtube_video_id("abcdefghijk") == "abcdefghijk"
 
 
+def test_canonical_youtube_watch_url_strips_playlist_parameters() -> None:
+    assert canonical_youtube_watch_url(
+        "https://www.youtube.com/watch?v=g3BOD2J45Mk&list=PLCtVGYYv4sMvQTSp5Wsw7uthfSBGC1z2x&index=4"
+    ) == "https://www.youtube.com/watch?v=g3BOD2J45Mk"
+
+
 def test_normalize_caption_text_removes_empty_and_duplicate_lines() -> None:
     text = normalize_caption_text(
         [
@@ -129,10 +139,13 @@ def test_ytdlp_audio_downloader_direct_command_avoids_ffmpeg_options(tmp_path: P
 async def test_ytdlp_audio_downloader_uses_direct_download_when_small(tmp_path: Path) -> None:
     downloader = FakeYtDlpAudioDownloader(direct_size=10, output_dir=tmp_path)
 
-    path = await downloader.download_audio("https://www.youtube.com/watch?v=abcdefghijk")
+    path = await downloader.download_audio(
+        "https://www.youtube.com/watch?v=abcdefghijk&list=playlist&index=4"
+    )
 
     assert path.suffix == ".m4a"
     assert len(downloader.commands) == 1
+    assert downloader.commands[0][-1] == "https://www.youtube.com/watch?v=abcdefghijk"
 
 
 @pytest.mark.anyio

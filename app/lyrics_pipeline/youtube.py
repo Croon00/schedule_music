@@ -21,6 +21,11 @@ def extract_youtube_video_id(url: str) -> str:
     raise ValueError("지원하지 않는 YouTube URL 또는 영상 ID입니다.")
 
 
+def canonical_youtube_watch_url(url: str) -> str:
+    video_id = extract_youtube_video_id(url)
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
 def normalize_caption_text(chunks: list[dict]) -> str:
     """자막 조각을 줄 단위의 간결한 가사 텍스트로 변환합니다."""
     lines: list[str] = []

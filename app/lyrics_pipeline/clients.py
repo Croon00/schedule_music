@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.lyrics_pipeline.models import CaptionTrack
+from app.lyrics_pipeline.youtube import canonical_youtube_watch_url
 
 
 LYRICS_TRANSFORM_SCHEMA = {
@@ -168,6 +169,7 @@ class YtDlpAudioDownloader:
 
     async def download_audio(self, youtube_url: str) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        youtube_url = canonical_youtube_watch_url(youtube_url)
         stem = f"audio_{uuid.uuid4().hex}"
         output_template = str(self.output_dir / f"{stem}.%(ext)s")
         direct_error: Exception | None = None
@@ -202,6 +204,7 @@ class YtDlpAudioDownloader:
             raise
 
     def _direct_download_command(self, output_template: str, youtube_url: str) -> list[str]:
+        youtube_url = canonical_youtube_watch_url(youtube_url)
         command = [
             sys.executable,
             "-m",
@@ -221,6 +224,7 @@ class YtDlpAudioDownloader:
         return command
 
     def _ffmpeg_extract_command(self, output_template: str, youtube_url: str) -> list[str]:
+        youtube_url = canonical_youtube_watch_url(youtube_url)
         command = [
             sys.executable,
             "-m",
