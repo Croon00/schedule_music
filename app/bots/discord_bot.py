@@ -64,7 +64,7 @@ LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 SONG_EXPORT_DIR = Path("exports") / "songs"
 NAMUWIKI_FIELD_MAX_CHARS = 500
-LyricsSourceMode = Literal["description", "comment", "caption", "audio", "manual"]
+LyricsSourceMode = Literal["description", "comment", "caption", "audio", "file"]
 
 
 class _NoopLyricsAiClient:
@@ -292,14 +292,14 @@ async def _collect_raw_lyrics_from_youtube(
     raise LyricsPipelineError("지원하지 않는 YouTube 가사 소스입니다.")
 
 
-def _raw_lyrics_from_manual_text(
+def _raw_lyrics_from_file_text(
     *,
     text: str | None,
     language_code: str,
     source_url: str | None,
 ) -> RawLyrics:
     if not text or not text.strip():
-        raise LyricsPipelineError("manual source_mode에는 lyrics 값이 필요합니다.")
+        raise LyricsPipelineError("file source_mode에는 lyrics_file txt 파일이 필요합니다.")
     return RawLyrics(
         text=text.strip(),
         source_type=LyricsSourceType.USER_LYRICS,
@@ -435,11 +435,11 @@ async def _collect_raw_lyrics_for_namuwiki(
     youtube_url: str,
     language_code: str,
     source_mode: LyricsSourceMode,
-    manual_lyrics: str | None = None,
+    file_lyrics: str | None = None,
 ) -> RawLyrics:
-    if source_mode == "manual":
-        return _raw_lyrics_from_manual_text(
-            text=manual_lyrics,
+    if source_mode == "file":
+        return _raw_lyrics_from_file_text(
+            text=file_lyrics,
             language_code=language_code,
             source_url=youtube_url,
         )
@@ -1161,15 +1161,15 @@ async def google_connect(interaction: discord.Interaction) -> None:
 )
 @app_commands.describe(
     youtube_url="확인할 YouTube URL",
-    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, manual 중 하나만 사용합니다.",
-    lyrics="source_mode가 manual일 때 RawLyrics.text로 사용할 가사입니다.",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, file 중 하나만 사용합니다.",
+    lyrics_file="source_mode가 file일 때 사용할 UTF-8 txt 가사 파일입니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
 )
 async def lyrics_source(
     interaction: discord.Interaction,
     youtube_url: str,
     source_mode: LyricsSourceMode = "caption",
-    lyrics: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -1182,9 +1182,10 @@ async def lyrics_source(
         except YouTubeTranscriptApiException:
             tracks = []
 
-        if source_mode == "manual":
-            raw = _raw_lyrics_from_manual_text(
-                text=lyrics,
+        if source_mode == "file":
+            lyrics_from_file = await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
+            raw = _raw_lyrics_from_file_text(
+                text=lyrics_from_file,
                 language_code=language_code,
                 source_url=youtube_url,
             )
@@ -1245,8 +1246,8 @@ async def lyrics_source(
     title="원본 곡 제목",
     title_ko="선택 한글 곡 제목",
     artist_name_ko="선택 한글 아티스트 이름",
-    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, manual 중 하나만 사용합니다.",
-    lyrics="source_mode가 manual일 때 RawLyrics.text로 저장할 가사입니다.",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, file 중 하나만 사용합니다.",
+    lyrics_file="source_mode가 file일 때 저장할 UTF-8 txt 가사 파일입니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
 )
 async def song_save(
@@ -1257,7 +1258,7 @@ async def song_save(
     title_ko: str | None = None,
     artist_name_ko: str | None = None,
     source_mode: LyricsSourceMode = "caption",
-    lyrics: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -1273,9 +1274,10 @@ async def song_save(
             init_db()
 
         video_id = extract_youtube_video_id(youtube_url)
-        if source_mode == "manual":
-            raw = _raw_lyrics_from_manual_text(
-                text=lyrics,
+        if source_mode == "file":
+            lyrics_from_file = await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
+            raw = _raw_lyrics_from_file_text(
+                text=lyrics_from_file,
                 language_code=language_code,
                 source_url=youtube_url,
             )
@@ -1563,8 +1565,8 @@ async def namuwiki_template_list(interaction: discord.Interaction) -> None:
     release_date="선택 발매일입니다. 예: 2026. 06. 25.",
     album="선택 앨범/싱글명입니다.",
     language_code="원문 언어 코드입니다. 예: ja, en, ko",
-    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, manual 중 하나만 사용합니다.",
-    lyrics="source_mode가 manual일 때 RawLyrics.text로 사용할 가사입니다.",
+    source_mode="가사를 가져올 소스입니다. description, comment, caption, audio, file 중 하나만 사용합니다.",
+    lyrics_file="source_mode가 file일 때 사용할 UTF-8 txt 가사 파일입니다.",
     extra_instruction="템플릿 적용 시 추가 지시입니다.",
 )
 async def namuwiki_render(
@@ -1586,7 +1588,7 @@ async def namuwiki_render(
     recording_director: str | None = None,
     recording_mixing: str | None = None,
     extra_credits: str | None = None,
-    lyrics: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
     source_mode: LyricsSourceMode = "caption",
     extra_instruction: str | None = None,
@@ -1598,11 +1600,16 @@ async def namuwiki_render(
 
     try:
         template = get_template(template_id.strip())
+        lyrics_from_file = (
+            await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
+            if source_mode == "file"
+            else None
+        )
         raw = await _collect_raw_lyrics_for_namuwiki(
             youtube_url=youtube_url,
             language_code=language_code,
             source_mode=source_mode,
-            manual_lyrics=lyrics,
+            file_lyrics=lyrics_from_file,
         )
 
         ai_client = OpenAiLyricsClient()
