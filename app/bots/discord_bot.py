@@ -64,7 +64,7 @@ LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 SONG_EXPORT_DIR = Path("exports") / "songs"
 NAMUWIKI_FIELD_MAX_CHARS = 500
-LyricsSourceMode = Literal["description", "comment", "caption", "audio"]
+LyricsSourceMode = Literal["description", "comment", "caption", "audio", "manual"]
 
 
 class _NoopLyricsAiClient:
@@ -274,6 +274,23 @@ async def _collect_raw_lyrics_from_youtube(
     raise LyricsPipelineError("지원하지 않는 YouTube 가사 소스입니다.")
 
 
+def _raw_lyrics_from_manual_text(
+    *,
+    text: str | None,
+    language_code: str,
+    source_url: str | None,
+) -> RawLyrics:
+    if not text or not text.strip():
+        raise LyricsPipelineError("manual source_mode에는 lyrics_text 또는 lyrics_file이 필요합니다.")
+    return RawLyrics(
+        text=text.strip(),
+        source_type=LyricsSourceType.USER_LYRICS,
+        language_code=language_code.strip() or "ja",
+        source_url=source_url,
+        needs_review=False,
+    )
+
+
 def _openai_status_text(
     translation_ko: str | None,
     pronunciation_ko: str | None,
@@ -400,7 +417,14 @@ async def _collect_raw_lyrics_for_namuwiki(
     youtube_url: str,
     language_code: str,
     source_mode: LyricsSourceMode,
+    manual_lyrics: str | None = None,
 ) -> RawLyrics:
+    if source_mode == "manual":
+        return _raw_lyrics_from_manual_text(
+            text=manual_lyrics,
+            language_code=language_code,
+            source_url=youtube_url,
+        )
     return await _collect_raw_lyrics_from_youtube(
         youtube_url=youtube_url,
         language_code=language_code,
@@ -1126,6 +1150,8 @@ async def lyrics_source(
     interaction: discord.Interaction,
     youtube_url: str,
     source_mode: LyricsSourceMode = "caption",
+    lyrics_text: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -1138,11 +1164,19 @@ async def lyrics_source(
         except YouTubeTranscriptApiException:
             tracks = []
 
-        raw = await _collect_raw_lyrics_from_youtube(
-            youtube_url=youtube_url,
-            language_code=language_code,
-            source_mode=source_mode,
-        )
+        lyrics_from_file = await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
+        if source_mode == "manual":
+            raw = _raw_lyrics_from_manual_text(
+                text=lyrics_from_file or lyrics_text,
+                language_code=language_code,
+                source_url=youtube_url,
+            )
+        else:
+            raw = await _collect_raw_lyrics_from_youtube(
+                youtube_url=youtube_url,
+                language_code=language_code,
+                source_mode=source_mode,
+            )
 
         openai_error = None
         try:
@@ -1205,6 +1239,8 @@ async def song_save(
     title_ko: str | None = None,
     artist_name_ko: str | None = None,
     source_mode: LyricsSourceMode = "caption",
+    lyrics_text: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
 ) -> None:
     await interaction.response.defer(ephemeral=True)
@@ -1220,11 +1256,19 @@ async def song_save(
             init_db()
 
         video_id = extract_youtube_video_id(youtube_url)
-        raw = await _collect_raw_lyrics_from_youtube(
-            youtube_url=youtube_url,
-            language_code=language_code,
-            source_mode=source_mode,
-        )
+        lyrics_from_file = await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
+        if source_mode == "manual":
+            raw = _raw_lyrics_from_manual_text(
+                text=lyrics_from_file or lyrics_text,
+                language_code=language_code,
+                source_url=youtube_url,
+            )
+        else:
+            raw = await _collect_raw_lyrics_from_youtube(
+                youtube_url=youtube_url,
+                language_code=language_code,
+                source_mode=source_mode,
+            )
 
         ai_client = OpenAiLyricsClient()
         translation_ko, pronunciation_ko = await ai_client.transform_lyrics(
@@ -1525,6 +1569,8 @@ async def namuwiki_render(
     recording_director: str | None = None,
     recording_mixing: str | None = None,
     extra_credits: str | None = None,
+    lyrics_text: str | None = None,
+    lyrics_file: discord.Attachment | None = None,
     language_code: str = "ja",
     source_mode: LyricsSourceMode = "caption",
     extra_instruction: str | None = None,
@@ -1536,10 +1582,12 @@ async def namuwiki_render(
 
     try:
         template = get_template(template_id.strip())
+        lyrics_from_file = await _fetch_text_attachment_text(lyrics_file, "직접 입력 가사")
         raw = await _collect_raw_lyrics_for_namuwiki(
             youtube_url=youtube_url,
             language_code=language_code,
             source_mode=source_mode,
+            manual_lyrics=lyrics_from_file or lyrics_text,
         )
 
         ai_client = OpenAiLyricsClient()
