@@ -37,6 +37,7 @@ class RawLyrics(LyricsBaseModel):
     language_code: str | None = None
     source_url: str | None = None
     needs_review: bool = False
+    diagnostics: dict[str, str] = Field(default_factory=dict)
 
 
 class LyricsTransform(LyricsBaseModel):

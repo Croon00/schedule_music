@@ -298,6 +298,11 @@ class OpenAiSpeechToTextClient:
                 file=audio_file,
                 model=self.model,
                 language=self.language or "ja",
+                prompt=(
+                    "Transcribe only the words that are clearly audible in the audio. "
+                    "Do not invent lyrics, credits, names, or repeated sections. "
+                    "If a section is unclear, omit it rather than guessing."
+                ),
                 response_format="text",
             )
         return str(response)

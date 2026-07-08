@@ -40,7 +40,7 @@ from app.lyrics_pipeline.clients import (
 )
 from app.lyrics_pipeline.models import LyricsInput, LyricsSourceType, RawLyrics
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
-from app.lyrics_pipeline.youtube import extract_youtube_video_id
+from app.lyrics_pipeline.youtube import canonical_youtube_watch_url, extract_youtube_video_id
 from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
 from app.namuwiki.models import (
     NamuWikiCredit,
@@ -125,6 +125,14 @@ def _caption_report(
         for track in tracks
     ]
     available_captions = chr(10).join(track_lines) if track_lines else "- none"
+    diagnostic_lines = []
+    if raw.source_url:
+        diagnostic_lines.append(f"- source_url: {raw.source_url}")
+    diagnostic_lines.extend(
+        f"- {key}: {value}"
+        for key, value in raw.diagnostics.items()
+        if value is not None
+    )
     sections = [
         f"URL: {youtube_url}",
         f"선택된 출처: {raw.source_type}",
@@ -139,6 +147,8 @@ def _caption_report(
         "",
         _caption_sample(raw.text),
     ]
+    if diagnostic_lines:
+        sections.extend(["", "## Diagnostics", "", "\n".join(diagnostic_lines)])
     if translation_ko is not None:
         sections.extend(["", "## 한국어 번역", "", translation_ko])
     if pronunciation_ko is not None:
@@ -263,12 +273,20 @@ async def _collect_raw_lyrics_from_youtube(
         text = (await OpenAiSpeechToTextClient(language=normalized_language).transcribe(audio_path)).strip()
         if not text:
             raise LyricsPipelineError("오디오 전사 결과가 비어 있습니다.")
+        canonical_url = canonical_youtube_watch_url(youtube_url)
         return RawLyrics(
             text=text,
             source_type=LyricsSourceType.AUDIO_TRANSCRIPT,
             language_code=normalized_language,
-            source_url=youtube_url,
+            source_url=canonical_url,
             needs_review=True,
+            diagnostics={
+                "requested_youtube_url": youtube_url,
+                "canonical_youtube_url": canonical_url,
+                "audio_file": str(audio_path),
+                "audio_file_name": audio_path.name,
+                "audio_file_size_bytes": str(audio_path.stat().st_size),
+            },
         )
 
     raise LyricsPipelineError("지원하지 않는 YouTube 가사 소스입니다.")
