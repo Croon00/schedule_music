@@ -113,6 +113,33 @@ def test_placeholder_template_can_include_video_section() -> None:
     assert response.json()["text"].endswith("\nafter\n")
 
 
+def test_placeholder_template_can_include_cover_image_and_row() -> None:
+    original_key = settings.openai_api_key
+    settings.openai_api_key = None
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/namuwiki/song-article/from-template",
+                json={
+                    "template_example": "{{cover_row}}\nimage={{cover_image}}",
+                    "song": {
+                        "title": "Song",
+                        "artist": "Artist",
+                        "cover_file": "Cover_Brand_New_Episode.jpg",
+                    },
+                },
+            )
+    finally:
+        settings.openai_api_key = original_key
+
+    assert response.status_code == 200
+    assert (
+        "||<-3><bgcolor=#fff,#2d2f34><nopad> "
+        "[[파일:Cover_Brand_New_Episode.jpg|width=100%]] ||"
+    ) in response.json()["text"]
+    assert "image=[[파일:Cover_Brand_New_Episode.jpg|width=100%]]" in response.json()["text"]
+
+
 def test_saved_template_can_be_created_listed_and_read(tmp_path: Path) -> None:
     original_dir = template_store.TEMPLATE_DIR
     test_dir = tmp_path / "namuwiki_templates"

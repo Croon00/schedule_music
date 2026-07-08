@@ -64,6 +64,8 @@ def _template_values(song: NamuWikiSongArticleRequest) -> dict[str, str | Callab
         "youtube_id": lambda: _extract_youtube_video_id(song.youtube_url or "") or "",
         "video_section": lambda: _render_video(song),
         "cover_file": song.cover_file or "",
+        "cover_image": lambda: _render_cover_image(song),
+        "cover_row": lambda: _render_cover_row(song),
         "theme_song_for": song.theme_song_for or "",
         "intro": song.intro or "",
         "title_image_dark": song.title_image_dark or "",
@@ -80,6 +82,19 @@ def _render_optional_name(name: str | None, name_ko: str | None) -> str:
     if not name or not name.strip():
         return ""
     return _render_name(name.strip(), name_ko)
+
+
+def _render_cover_image(song: NamuWikiSongArticleRequest) -> str:
+    if not song.cover_file or not song.cover_file.strip():
+        return ""
+    return f"[[파일:{song.cover_file.strip()}|width=100%]]"
+
+
+def _render_cover_row(song: NamuWikiSongArticleRequest) -> str:
+    cover_image = _render_cover_image(song)
+    if not cover_image:
+        return ""
+    return f"||<-3><bgcolor=#fff,#2d2f34><nopad> {cover_image} ||"
 
 
 def _render_plain_extra_credits(song: NamuWikiSongArticleRequest) -> str:
