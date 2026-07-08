@@ -210,6 +210,20 @@ def init_db() -> None:
         )
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS review_notes TEXT")
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS namuwiki_templates (
+                template_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                template_example TEXT NOT NULL,
+                discord_user_id TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute("ALTER TABLE namuwiki_templates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
         conn.commit()
 
 
