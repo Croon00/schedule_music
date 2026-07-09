@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
-from app.lyrics_pipeline.clients import YtDlpAudioDownloader
+from app.lyrics_pipeline.clients import OpenAiLyricsClient, YtDlpAudioDownloader
 from app.lyrics_pipeline.models import CaptionTrack, LyricsInput, LyricsSourceType
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import (
@@ -120,6 +121,18 @@ def test_normalize_caption_text_removes_empty_and_duplicate_lines() -> None:
     )
 
     assert text == "hello world\nsecond line"
+
+
+def test_openai_lyrics_prompt_preserves_english_in_translation_and_pronunciation() -> None:
+    source = inspect.getsource(OpenAiLyricsClient.transform_lyrics)
+
+    assert "For translation_ko" in source
+    assert "For pronunciation_ko" in source
+    assert "keep actual English words" in source
+    assert "Do not convert English" in source
+    assert "phonetic spelling" in source
+    assert "romanized non-English lyrics" in source
+    assert "romaji" in source
 
 
 def test_ytdlp_audio_downloader_direct_command_avoids_ffmpeg_options(tmp_path: Path) -> None:

@@ -345,10 +345,13 @@ class OpenAiLyricsClient:
                 {
                     "role": "system",
                     "content": (
-                        "For pronunciation_ko, keep English words, English sentences, romanized text, "
-                        "artist names, song titles, and proper nouns exactly as written in the original. "
-                        "Do not convert English into Korean phonetic spelling. Only non-Latin lyrics, "
-                        "such as Japanese or Chinese, should be written as Korean-style pronunciation."
+                        "For translation_ko, translate non-English lyrics into natural Korean, but keep English "
+                        "words, English sentences, artist names, song titles, and proper nouns exactly as "
+                        "written in the original. For pronunciation_ko, keep actual English words and English "
+                        "sentences exactly as written in the original. Do not convert English into Korean "
+                        "phonetic spelling. Non-English lyrics should be written as Korean-style Hangul "
+                        "pronunciation, including Japanese, Chinese, and romanized non-English lyrics such as "
+                        "romaji. Preserve the input line breaks as much as possible."
                     ),
                 },
                 {
