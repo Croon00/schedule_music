@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from app.lyrics_pipeline.clients import OpenAiLyricsClient, YtDlpAudioDownloader
+from app.lyrics_pipeline.clients import (
+    OpenAiLyricsClient,
+    YtDlpAudioDownloader,
+    _pronunciation_needs_retry,
+)
 from app.lyrics_pipeline.models import CaptionTrack, LyricsInput, LyricsSourceType
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import (
@@ -133,6 +137,19 @@ def test_openai_lyrics_prompt_preserves_english_in_translation_and_pronunciation
     assert "phonetic spelling" in source
     assert "romanized non-English lyrics" in source
     assert "romaji" in source
+
+
+def test_pronunciation_retry_detects_copied_japanese_source() -> None:
+    original = "ねえ 抜け出そうか\n向かい風 笑い飛ばそう"
+
+    assert _pronunciation_needs_retry(original, original) is True
+
+
+def test_pronunciation_retry_allows_hangul_and_english_pronunciation() -> None:
+    original = "今 Stay loosey 歩み行く日々に"
+    pronunciation = "이마 Stay loosey 아유미유쿠 히비니"
+
+    assert _pronunciation_needs_retry(original, pronunciation) is False
 
 
 def test_ytdlp_audio_downloader_direct_command_avoids_ffmpeg_options(tmp_path: Path) -> None:

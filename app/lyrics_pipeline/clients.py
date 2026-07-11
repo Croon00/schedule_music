@@ -29,6 +29,49 @@ LYRICS_TRANSFORM_SCHEMA = {
 }
 
 
+def _contains_cjk_or_kana(value: str) -> bool:
+    for char in value:
+        codepoint = ord(char)
+        if (
+            0x3040 <= codepoint <= 0x30FF
+            or 0x3400 <= codepoint <= 0x4DBF
+            or 0x4E00 <= codepoint <= 0x9FFF
+            or 0xF900 <= codepoint <= 0xFAFF
+        ):
+            return True
+    return False
+
+
+def _normalize_copy_check(value: str) -> str:
+    return "".join(char.casefold() for char in value if char.isalnum())
+
+
+def _pronunciation_needs_retry(original: str, pronunciation_ko: str) -> bool:
+    if not pronunciation_ko.strip() or not _contains_cjk_or_kana(pronunciation_ko):
+        return False
+
+    original_normalized = _normalize_copy_check(original)
+    pronunciation_normalized = _normalize_copy_check(pronunciation_ko)
+    if original_normalized and original_normalized == pronunciation_normalized:
+        return True
+
+    original_lines = {
+        _normalize_copy_check(line)
+        for line in original.splitlines()
+        if _normalize_copy_check(line)
+    }
+    pronunciation_lines = [
+        _normalize_copy_check(line)
+        for line in pronunciation_ko.splitlines()
+        if _normalize_copy_check(line)
+    ]
+    if not original_lines or not pronunciation_lines:
+        return True
+
+    copied_lines = sum(1 for line in pronunciation_lines if line in original_lines)
+    return copied_lines / len(pronunciation_lines) >= 0.5
+
+
 def _split_proxy_locations(value: str | None) -> list[str] | None:
     if not value:
         return None
@@ -331,38 +374,39 @@ class OpenAiLyricsClient:
             raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
 
         client = AsyncOpenAI(api_key=self.api_key)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "제공된 짧은 가사 발췌문을 자연스러운 한국어로 번역하고, "
+                    "원문의 한글식 발음을 제공하세요. 가능하면 입력 줄바꿈과 "
+                    "출력 줄바꿈을 맞추세요. 스키마와 일치하는 JSON 필드만 반환하세요."
+                ),
+            },
+            {
+                "role": "system",
+                "content": (
+                    "For translation_ko, translate non-English lyrics into natural Korean, but keep English "
+                    "words, English sentences, artist names, song titles, and proper nouns exactly as "
+                    "written in the original. For pronunciation_ko, keep actual English words and English "
+                    "sentences exactly as written in the original. Do not convert English into Korean "
+                    "phonetic spelling. Non-English lyrics should be written as Korean-style Hangul "
+                    "pronunciation, including Japanese, Chinese, and romanized non-English lyrics such as "
+                    "romaji. Preserve the input line breaks as much as possible."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"아티스트: {artist or '(알 수 없음)'}\n"
+                    f"제목: {title or '(알 수 없음)'}\n\n"
+                    f"가사 발췌:\n{lyrics}"
+                ),
+            },
+        ]
         response = await client.chat.completions.create(
             model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "제공된 짧은 가사 발췌문을 자연스러운 한국어로 번역하고, "
-                        "원문의 한글식 발음을 제공하세요. 가능하면 입력 줄바꿈과 "
-                        "출력 줄바꿈을 맞추세요. 스키마와 일치하는 JSON 필드만 반환하세요."
-                    ),
-                },
-                {
-                    "role": "system",
-                    "content": (
-                        "For translation_ko, translate non-English lyrics into natural Korean, but keep English "
-                        "words, English sentences, artist names, song titles, and proper nouns exactly as "
-                        "written in the original. For pronunciation_ko, keep actual English words and English "
-                        "sentences exactly as written in the original. Do not convert English into Korean "
-                        "phonetic spelling. Non-English lyrics should be written as Korean-style Hangul "
-                        "pronunciation, including Japanese, Chinese, and romanized non-English lyrics such as "
-                        "romaji. Preserve the input line breaks as much as possible."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"아티스트: {artist or '(알 수 없음)'}\n"
-                        f"제목: {title or '(알 수 없음)'}\n\n"
-                        f"가사 발췌:\n{lyrics}"
-                    ),
-                },
-            ],
+            messages=messages,
             response_format={"type": "json_schema", "json_schema": LYRICS_TRANSFORM_SCHEMA},
         )
         content = response.choices[0].message.content
@@ -370,6 +414,32 @@ class OpenAiLyricsClient:
             return "", ""
 
         data = json.loads(content)
+        if _pronunciation_needs_retry(lyrics, data["pronunciation_ko"]):
+            messages.extend(
+                [
+                    {"role": "assistant", "content": content},
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous pronunciation_ko copied Japanese/Chinese source text. "
+                            "Regenerate the full JSON. pronunciation_ko must be Korean Hangul "
+                            "phonetic text for every non-English lyric line. Do not leave kana, "
+                            "kanji, hanzi, or romaji in pronunciation_ko. Keep English words and "
+                            "sentences exactly as English."
+                        ),
+                    },
+                ]
+            )
+            retry_response = await client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                response_format={"type": "json_schema", "json_schema": LYRICS_TRANSFORM_SCHEMA},
+            )
+            retry_content = retry_response.choices[0].message.content
+            if retry_content:
+                retry_data = json.loads(retry_content)
+                if not _pronunciation_needs_retry(lyrics, retry_data["pronunciation_ko"]):
+                    data = retry_data
         return data["translation_ko"], data["pronunciation_ko"]
 
     async def render_namuwiki(
