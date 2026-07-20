@@ -37,6 +37,20 @@ RK_MUSIC_X_SOURCES: tuple[tuple[str, str], ...] = (
 )
 RK_MUSIC_SYSTEM_USER_ID = "system:rkmusic"
 
+ADDITIONAL_ARTIST_X_SOURCES: tuple[tuple[str, str], ...] = (
+    ("Aimer", "Aimer_and_staff"),
+    ("milet", "milet_music"),
+    ("ReoNa", "xoxleoxox"),
+    ("tayori", "tayori_tri"),
+    ("ヨルシカ", "nbuna_staff"),
+    ("Rokudenashi", "Rokudenashi_nzn"),
+    ("LiSA", "LiSA_OLiVE"),
+    ("yanaginagi", "yanaginagi"),
+    ("supercell", "supercell_sc"),
+    ("fhána", "fhana_jp"),
+)
+ADDITIONAL_ARTISTS_SYSTEM_USER_ID = "system:additional-artists"
+
 
 def get_connection() -> Connection:
     """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환합니다."""
@@ -73,6 +87,42 @@ def _seed_rkmusic_x_sources(conn: Connection) -> None:
                 ),
             ).fetchone()
 
+        conn.execute(
+            """
+            INSERT INTO artist_sources (artist_id, source_type, label, value)
+            VALUES (%s, 'x', 'Official X', %s)
+            ON CONFLICT (artist_id, source_type, value) DO NOTHING
+            """,
+            (artist["id"], x_username),
+        )
+
+
+def _seed_artist_x_sources(
+    conn: Connection,
+    *,
+    owner_id: str,
+    sources: tuple[tuple[str, str], ...],
+    note: str,
+) -> None:
+    """Insert a named official-source preset without modifying user-owned artists."""
+    for artist_name, x_username in sources:
+        artist = conn.execute(
+            """
+            SELECT id FROM artists
+            WHERE discord_user_id = %s AND name = %s
+            ORDER BY id LIMIT 1
+            """,
+            (owner_id, artist_name),
+        ).fetchone()
+        if artist is None:
+            artist = conn.execute(
+                """
+                INSERT INTO artists (discord_user_id, name, display_name, notes)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (owner_id, artist_name, artist_name, note),
+            ).fetchone()
         conn.execute(
             """
             INSERT INTO artist_sources (artist_id, source_type, label, value)
@@ -199,6 +249,12 @@ def init_db() -> None:
             """
         )
         _seed_rkmusic_x_sources(conn)
+        _seed_artist_x_sources(
+            conn,
+            owner_id=ADDITIONAL_ARTISTS_SYSTEM_USER_ID,
+            sources=ADDITIONAL_ARTIST_X_SOURCES,
+            note="Official X source (managed preset)",
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS calendar_syncs (
