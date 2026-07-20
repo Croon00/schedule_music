@@ -543,7 +543,7 @@ def _list_sources_for_user(discord_user_id: str) -> list[dict]:
                 a.display_name
             FROM artist_sources s
             JOIN artists a ON a.id = s.artist_id
-            WHERE a.discord_user_id = %s
+            WHERE a.discord_user_id = %s OR a.discord_user_id = 'system:rkmusic'
             ORDER BY a.name, s.source_type, s.value
             LIMIT 50
             """,

@@ -9,11 +9,78 @@ from psycopg.rows import dict_row
 from app.core.config import settings
 
 
+# Official X accounts confirmed from RK Music's artist and release pages.
+# These are system-owned sources: Discord routes can deliver them to any guild,
+# while they are intentionally not tied to a person's Google Calendar.
+RK_MUSIC_X_SOURCES: tuple[tuple[str, str], ...] = (
+    ("RK Music", "RKMusic_inc"),
+    ("HACHI", "8HaChi_hacchi"),
+    ("KMNZ", "KMNSTREET"),
+    ("VESPERBELL", "vesperbell_info"),
+    ("CULUA", "culua0211"),
+    ("NEUN", "neun09"),
+    ("MEDA", "medazcd"),
+    ("CONA", "C_O_SK"),
+    ("IMI", "IMI_RKMusic"),
+    ("XIDEN", "XIDEN_RKMusic"),
+    ("YONO", "Yono_RKMusic"),
+    ("MEMESIA", "MEMESIA_0224"),
+    ("LEWNE", "LEWNE_1123"),
+    ("羽緒", "Hao_1211"),
+    ("Cil", "Cil_0320"),
+    ("深影", "Mikage_0916"),
+    ("wouca", "wouca_rkm"),
+    ("妃玖", "fused_kisaki"),
+    ("Diα", "fused_dia"),
+    ("HONK THE HORN", "HONKTHEHORN"),
+    ("NUROJUNK", "NUROJUNK"),
+)
+RK_MUSIC_SYSTEM_USER_ID = "system:rkmusic"
+
+
 def get_connection() -> Connection:
     """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환합니다."""
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL is required for database-backed routes.")
     return psycopg.connect(settings.database_url, row_factory=dict_row)
+
+
+def _seed_rkmusic_x_sources(conn: Connection) -> None:
+    """Insert the curated RK Music X sources without duplicating user data."""
+    for artist_name, x_username in RK_MUSIC_X_SOURCES:
+        artist = conn.execute(
+            """
+            SELECT id
+            FROM artists
+            WHERE discord_user_id = %s AND name = %s
+            ORDER BY id
+            LIMIT 1
+            """,
+            (RK_MUSIC_SYSTEM_USER_ID, artist_name),
+        ).fetchone()
+        if artist is None:
+            artist = conn.execute(
+                """
+                INSERT INTO artists (discord_user_id, name, display_name, notes)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    RK_MUSIC_SYSTEM_USER_ID,
+                    artist_name,
+                    artist_name,
+                    "Official RK Music X source (managed preset)",
+                ),
+            ).fetchone()
+
+        conn.execute(
+            """
+            INSERT INTO artist_sources (artist_id, source_type, label, value)
+            VALUES (%s, 'x', 'Official X', %s)
+            ON CONFLICT (artist_id, source_type, value) DO NOTHING
+            """,
+            (artist["id"], x_username),
+        )
 
 
 def init_db() -> None:
@@ -131,6 +198,7 @@ def init_db() -> None:
             )
             """
         )
+        _seed_rkmusic_x_sources(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS calendar_syncs (
