@@ -14,6 +14,7 @@ NotificationItemType = Literal[
     "ticket",
     "merch",
     "irrelevant",
+    "all_non_ticket",
 ]
 
 NOTIFICATION_ITEM_TYPES: tuple[str, ...] = (
@@ -23,6 +24,8 @@ NOTIFICATION_ITEM_TYPES: tuple[str, ...] = (
     "ticket",
     "merch",
     "irrelevant",
+    # Artist-specific catch-all: sends every classified post except tickets.
+    "all_non_ticket",
 )
 
 
@@ -164,10 +167,8 @@ def find_notification_routes_for_item(
     source_id: int,
     item_type: str,
 ) -> list[dict]:
-    """Return active routes that should receive one classified source item."""
+    """Return active exact routes plus artist-specific non-ticket catch-all routes."""
     normalized_item_type = normalize_item_type(item_type)
-    if normalized_item_type == "irrelevant":
-        return []
 
     with get_connection() as conn:
         rows = conn.execute(
@@ -181,11 +182,17 @@ def find_notification_routes_for_item(
             LEFT JOIN artist_sources s ON s.id = r.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             WHERE r.is_active = TRUE
-                AND r.item_type = %s
-                AND (r.source_id = %s OR r.source_id IS NULL)
+                AND (
+                    (r.item_type = %s AND (r.source_id = %s OR r.source_id IS NULL))
+                    OR (
+                        r.item_type = 'all_non_ticket'
+                        AND r.source_id = %s
+                        AND %s <> 'ticket'
+                    )
+                )
             ORDER BY r.source_id NULLS LAST, r.id
             """,
-            (normalized_item_type, source_id),
+            (normalized_item_type, source_id, source_id, normalized_item_type),
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 

@@ -1054,7 +1054,7 @@ async def source_list(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="route_add", description="소스/글 타입별 Discord 알림 채널을 연결합니다.")
 @app_commands.describe(
-    item_type="notice, release, live_event, ticket, merch 중 하나",
+    item_type="글 타입 또는 all_non_ticket(아티스트별 티켓 외 전체 글)",
     channel="알림을 보낼 Discord 채널",
     source_id="/source_list에서 확인한 source_id. 비우면 서버 전체 기본 route로 사용합니다.",
 )
@@ -1065,6 +1065,7 @@ async def source_list(interaction: discord.Interaction) -> None:
         app_commands.Choice(name="live_event 라이브/공연", value="live_event"),
         app_commands.Choice(name="ticket 티켓/응모", value="ticket"),
         app_commands.Choice(name="merch 굿즈/상품", value="merch"),
+        app_commands.Choice(name="all_non_ticket 티켓 외 모든 글", value="all_non_ticket"),
     ]
 )
 async def route_add(
@@ -1073,8 +1074,15 @@ async def route_add(
     channel: discord.TextChannel,
     source_id: int | None = None,
 ) -> None:
-    """분류된 글 타입을 현재 Discord 서버의 특정 채널로 보내도록 설정합니다."""
+    """분류된 글 타입 또는 아티스트별 티켓 외 전체 글을 채널로 보냅니다."""
     await interaction.response.defer(ephemeral=True)
+    if item_type == "all_non_ticket" and source_id is None:
+        await interaction.followup.send(
+            "all_non_ticket은 아티스트별 설정입니다. /source_list의 source_id를 지정해주세요.",
+            ephemeral=True,
+        )
+        return
+
     try:
         _ensure_manage_guild(interaction)
         guild_id = _guild_id_from_interaction(interaction)
