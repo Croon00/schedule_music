@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 
 LYRICS_SAMPLE_MAX_CHARS = 15000
 LYRICS_SAMPLE_MAX_LINES = 15000
+DISCORD_MESSAGE_MAX_CHARS = 1900
 LYRICS_EXPORT_DIR = Path("exports")
 NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 SONG_EXPORT_DIR = Path("exports") / "songs"
@@ -543,12 +544,34 @@ def _list_sources_for_user(discord_user_id: str) -> list[dict]:
                 a.display_name
             FROM artist_sources s
             JOIN artists a ON a.id = s.artist_id
-            WHERE a.discord_user_id = %s OR a.discord_user_id LIKE 'system:%'
+            WHERE a.discord_user_id = %s OR a.discord_user_id LIKE 'system:%%'
             ORDER BY a.name, s.source_type, s.value
             LIMIT 50
             """,
             (discord_user_id,),
         ).fetchall()
+
+
+def _split_discord_message_lines(lines: list[str], max_chars: int = DISCORD_MESSAGE_MAX_CHARS) -> list[str]:
+    """Discord의 메시지 길이 제한을 넘지 않도록 줄 목록을 안전하게 나눕니다."""
+    chunks: list[str] = []
+    current = ""
+
+    for line in lines:
+        # 예상보다 긴 단일 항목도 안전하게 잘라 전송한다.
+        line_parts = [line[index : index + max_chars] for index in range(0, len(line), max_chars)] or [""]
+        for part in line_parts:
+            if not current:
+                current = part
+            elif len(current) + 1 + len(part) <= max_chars:
+                current = f"{current}\n{part}"
+            else:
+                chunks.append(current)
+                current = part
+
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _format_route(route: dict) -> str:
@@ -1002,7 +1025,16 @@ async def source_list(interaction: discord.Interaction) -> None:
         await interaction.followup.send("DATABASE_URL이 설정되어 있어야 조회할 수 있습니다.", ephemeral=True)
         return
 
-    sources = _list_sources_for_user(str(interaction.user.id))
+    try:
+        sources = _list_sources_for_user(str(interaction.user.id))
+    except Exception:
+        logger.exception("/source_list source 조회에 실패했습니다.")
+        await interaction.followup.send(
+            "소스 목록을 조회하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            ephemeral=True,
+        )
+        return
+
     if not sources:
         await interaction.followup.send("등록된 소스가 없습니다. 먼저 /artist_add로 X 계정을 등록해주세요.", ephemeral=True)
         return
@@ -1016,7 +1048,8 @@ async def source_list(interaction: discord.Interaction) -> None:
             f"#{source['id']} {artist} / `{source['source_type']}` {source['value']}{label}{active}"
         )
 
-    await interaction.followup.send("\n".join(lines), ephemeral=True)
+    for message in _split_discord_message_lines(lines):
+        await interaction.followup.send(message, ephemeral=True)
 
 
 @bot.tree.command(name="route_add", description="소스/글 타입별 Discord 알림 채널을 연결합니다.")
