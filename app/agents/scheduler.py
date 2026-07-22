@@ -353,7 +353,9 @@ def _build_notification_message(
     excerpt = _truncate_text(post.get("text", ""), 600)
     if excerpt and excerpt != title:
         lines.extend(["", excerpt])
-    if classification_reason:
+    if item_type == "irrelevant":
+        lines.extend(["", "(분류 : 잡담)"])
+    elif classification_reason:
         lines.extend(["", f"분류: `{item_type}` ({classification_reason})"])
     lines.append(f"원문: {url}")
 

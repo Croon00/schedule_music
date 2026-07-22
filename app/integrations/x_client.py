@@ -30,13 +30,21 @@ async def get_x_user_id(username: str) -> str:
     return data["data"]["id"]
 
 
-async def fetch_recent_posts(user_id: str, since_id: str | None = None) -> list[dict[str, Any]]:
+async def fetch_recent_posts(
+    user_id: str,
+    since_id: str | None = None,
+    *,
+    max_results: int = 5,
+) -> list[dict[str, Any]]:
     """특정 X user id의 최신 원본 게시물을 가져오고, since_id 이후만 조회할 수 있습니다."""
     if not settings.x_bearer_token:
         raise RuntimeError("X_BEARER_TOKEN이 설정되어 있지 않습니다.")
 
+    if not 5 <= max_results <= 100:
+        raise ValueError("max_results must be between 5 and 100.")
+
     params = {
-        "max_results": "3",
+        "max_results": str(max_results),
         "tweet.fields": "created_at,entities",
         "exclude": "retweets,replies",
     }
