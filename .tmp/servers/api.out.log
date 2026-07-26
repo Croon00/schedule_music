@@ -1,0 +1,10 @@
+INFO:     127.0.0.1:64003 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64947 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64948 - "GET /spotify/artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64950 - "POST /spotify/artists/sync HTTP/1.1" 403 Forbidden
+INFO:     127.0.0.1:52337 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58169 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59680 - "GET /spotify/artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55392 - "GET /event-candidates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55391 - "GET /artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55600 - "GET /health HTTP/1.1" 200 OK

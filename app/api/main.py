@@ -23,6 +23,17 @@ from app.integrations.google_calendar import (
     exchange_code_for_tokens,
     google_oauth_configured,
 )
+from app.integrations.spotify import (
+    SpotifyAlbumDetail,
+    SpotifyAlbumSummary,
+    SpotifyApiError,
+    SpotifyRegisteredArtist,
+    SpotifyRelationship,
+    get_album_detail,
+    get_artist_discography,
+    search_spotify_artist,
+    spotify_configured,
+)
 from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
 from app.namuwiki.models import (
     NamuWikiSavedTemplateSongArticleRequest,
@@ -338,6 +349,155 @@ def list_event_candidates(status_filter: str | None = None) -> list[dict]:
                 "SELECT * FROM event_candidates ORDER BY created_at DESC"
             ).fetchall()
         return [row_to_dict(row) for row in rows]
+
+
+@app.get("/spotify/artists", response_model=list[SpotifyRegisteredArtist])
+def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
+    """등록 아티스트와 현재 Spotify 매칭 상태를 반환합니다."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id, name, display_name, spotify_artist_id, spotify_name,
+                spotify_image_url, spotify_url
+            FROM artists
+            ORDER BY COALESCE(display_name, name)
+            """
+        ).fetchall()
+    return [
+        SpotifyRegisteredArtist(
+            local_artist_id=row["id"],
+            local_name=row["display_name"] or row["name"],
+            spotify_artist_id=row["spotify_artist_id"],
+            spotify_name=row["spotify_name"],
+            image_url=row["spotify_image_url"],
+            spotify_url=row["spotify_url"],
+            matched=bool(row["spotify_artist_id"]),
+        )
+        for row in rows
+    ]
+
+
+@app.post("/spotify/artists/sync", response_model=list[SpotifyRegisteredArtist])
+async def sync_spotify_artists() -> list[SpotifyRegisteredArtist]:
+    """Spotify 검색으로 등록 아티스트의 프로필, 이미지와 ID를 갱신합니다."""
+    if not spotify_configured():
+        raise HTTPException(status_code=503, detail="Spotify API가 설정되어 있지 않습니다.")
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, display_name FROM artists ORDER BY id"
+        ).fetchall()
+
+    for row in rows:
+        try:
+            profile = await search_spotify_artist(
+                row["id"],
+                row["display_name"] or row["name"],
+            )
+            if profile is None and row["display_name"]:
+                profile = await search_spotify_artist(row["id"], row["name"])
+        except SpotifyApiError as exc:
+            detail = str(exc)
+            if exc.status_code == 403 and "premium subscription" in detail.lower():
+                detail = (
+                    "Spotify 앱 소유자 계정에 활성 Premium 구독이 필요합니다. "
+                    "구독 상태 변경 후 API 반영까지 몇 시간이 걸릴 수 있습니다."
+                )
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        if profile is None:
+            continue
+        with get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE artists
+                SET spotify_artist_id = %s,
+                    spotify_name = %s,
+                    spotify_image_url = %s,
+                    spotify_url = %s,
+                    spotify_match_updated_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (
+                    profile.spotify_artist_id,
+                    profile.name,
+                    profile.image_url,
+                    profile.spotify_url,
+                    row["id"],
+                ),
+            )
+            conn.commit()
+    return list_spotify_artists()
+
+
+@app.get(
+    "/spotify/artists/{artist_id}/discography",
+    response_model=list[SpotifyAlbumSummary],
+)
+async def get_spotify_discography(artist_id: int) -> list[SpotifyAlbumSummary]:
+    """등록 아티스트의 앨범, 싱글, 참여작 전체를 Spotify에서 조회합니다."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT spotify_artist_id FROM artists WHERE id = %s",
+            (artist_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="아티스트를 찾을 수 없습니다.")
+    if not row["spotify_artist_id"]:
+        raise HTTPException(status_code=409, detail="Spotify 아티스트 매칭이 필요합니다.")
+    return await get_artist_discography(row["spotify_artist_id"])
+
+
+@app.get("/spotify/albums/{album_id}", response_model=SpotifyAlbumDetail)
+async def get_spotify_album(album_id: str) -> SpotifyAlbumDetail:
+    """한 앨범 또는 싱글의 전체 수록곡을 반환합니다."""
+    if not spotify_configured():
+        raise HTTPException(status_code=503, detail="Spotify API가 설정되어 있지 않습니다.")
+    try:
+        return await get_album_detail(album_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Spotify 앨범 조회에 실패했습니다.") from exc
+
+
+@app.get("/spotify/relationships", response_model=list[SpotifyRelationship])
+async def get_spotify_relationships() -> list[SpotifyRelationship]:
+    """공동 앨범·싱글 크레딧을 이용해 등록 아티스트 사이의 연결을 계산합니다."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, spotify_artist_id
+            FROM artists
+            WHERE spotify_artist_id IS NOT NULL
+            ORDER BY id
+            """
+        ).fetchall()
+    spotify_to_local = {row["spotify_artist_id"]: row["id"] for row in rows}
+    relationships: dict[tuple[int, int], SpotifyRelationship] = {}
+    for row in rows:
+        albums = await get_artist_discography(row["spotify_artist_id"])
+        for album in albums:
+            for collaborator_id in album.artist_ids:
+                target_id = spotify_to_local.get(collaborator_id)
+                if target_id is None or target_id == row["id"]:
+                    continue
+                source_id, related_id = sorted((row["id"], target_id))
+                key = (source_id, related_id)
+                relation = relationships.setdefault(
+                    key,
+                    SpotifyRelationship(
+                        source_artist_id=source_id,
+                        target_artist_id=related_id,
+                        strength=0,
+                    ),
+                )
+                if album.name not in relation.shared_releases:
+                    relation.shared_releases.append(album.name)
+                    relation.strength += 1
+    return sorted(
+        relationships.values(),
+        key=lambda relation: (-relation.strength, relation.source_artist_id),
+    )
 
 
 def _ensure_artist_exists(conn: Connection, artist_id: int) -> None:

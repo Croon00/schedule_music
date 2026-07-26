@@ -6,3 +6,7 @@ tmp_pytest*/
 data/*.db
 data/*.db-*
 exports/
+web/node_modules/
+web/dist/
+web/auto-imports.d.ts
+web/components.d.ts

@@ -192,6 +192,13 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_artist_id TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_name TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_image_url TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_url TEXT")
+        conn.execute(
+            "ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_match_updated_at TIMESTAMPTZ"
+        )
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS external_user_id TEXT")
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS last_seen_external_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")

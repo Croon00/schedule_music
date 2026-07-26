@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 from typing import Any
 
 import httpx
@@ -11,6 +12,13 @@ from app.core.config import settings
 
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search"
+SPOTIFY_API_URL = "https://api.spotify.com/v1"
+
+
+class SpotifyApiError(RuntimeError):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class SpotifyTrackInfo(BaseModel):
@@ -29,6 +37,61 @@ class SpotifyTrackInfo(BaseModel):
     spotify_url: str | None = None
     cover_image_url: str | None = None
     raw: dict[str, Any]
+
+
+class SpotifyArtistProfile(BaseModel):
+    local_artist_id: int
+    spotify_artist_id: str
+    name: str
+    image_url: str | None = None
+    spotify_url: str | None = None
+    genres: list[str] = Field(default_factory=list)
+
+
+class SpotifyAlbumSummary(BaseModel):
+    id: str
+    name: str
+    album_type: str
+    release_date: str | None = None
+    release_date_precision: str | None = None
+    total_tracks: int = 0
+    image_url: str | None = None
+    spotify_url: str | None = None
+    artists: list[str] = Field(default_factory=list)
+    artist_ids: list[str] = Field(default_factory=list)
+
+
+class SpotifyTrackSummary(BaseModel):
+    id: str
+    name: str
+    track_number: int
+    disc_number: int
+    duration_ms: int | None = None
+    explicit: bool = False
+    spotify_url: str | None = None
+    artists: list[str] = Field(default_factory=list)
+    artist_ids: list[str] = Field(default_factory=list)
+
+
+class SpotifyAlbumDetail(SpotifyAlbumSummary):
+    tracks: list[SpotifyTrackSummary] = Field(default_factory=list)
+
+
+class SpotifyRelationship(BaseModel):
+    source_artist_id: int
+    target_artist_id: int
+    strength: int
+    shared_releases: list[str] = Field(default_factory=list)
+
+
+class SpotifyRegisteredArtist(BaseModel):
+    local_artist_id: int
+    local_name: str
+    spotify_artist_id: str | None = None
+    spotify_name: str | None = None
+    image_url: str | None = None
+    spotify_url: str | None = None
+    matched: bool = False
 
 
 def spotify_configured() -> bool:
@@ -72,6 +135,165 @@ async def search_spotify_track(artist: str, title: str) -> SpotifyTrackInfo | No
     if not items:
         return None
     return spotify_track_from_api_item(items[0])
+
+
+async def search_spotify_artist(local_artist_id: int, name: str) -> SpotifyArtistProfile | None:
+    """Resolve one local artist to the closest Spotify artist search result."""
+    token = await _get_spotify_access_token()
+    data = await _spotify_get(
+        "/search",
+        token,
+        params={"q": f'artist:"{name}"', "type": "artist", "limit": 5},
+    )
+    items = ((data.get("artists") or {}).get("items") or [])
+    if not items:
+        return None
+
+    normalized = _normalize_name(name)
+    best = min(
+        items,
+        key=lambda item: (
+            0 if _normalize_name(str(item.get("name") or "")) == normalized else 1,
+            len(str(item.get("name") or "")),
+        ),
+    )
+    return spotify_artist_from_api_item(local_artist_id, best)
+
+
+async def get_spotify_artist(
+    local_artist_id: int,
+    spotify_artist_id: str,
+) -> SpotifyArtistProfile:
+    token = await _get_spotify_access_token()
+    item = await _spotify_get(f"/artists/{spotify_artist_id}", token)
+    return spotify_artist_from_api_item(local_artist_id, item)
+
+
+async def get_artist_discography(
+    spotify_artist_id: str,
+    *,
+    include_groups: str = "album,single,appears_on,compilation",
+) -> list[SpotifyAlbumSummary]:
+    """Fetch every album page for one Spotify artist and remove market duplicates."""
+    token = await _get_spotify_access_token()
+    items = await _spotify_get_all_pages(
+        f"/artists/{spotify_artist_id}/albums",
+        token,
+        params={"include_groups": include_groups, "market": "KR", "limit": 10},
+    )
+    unique: dict[str, SpotifyAlbumSummary] = {}
+    for item in items:
+        album = spotify_album_from_api_item(item)
+        existing = unique.get(album.id)
+        if existing is None or (album.release_date or "") > (existing.release_date or ""):
+            unique[album.id] = album
+    return sorted(
+        unique.values(),
+        key=lambda album: (album.release_date or "", album.name),
+        reverse=True,
+    )
+
+
+async def get_album_detail(album_id: str) -> SpotifyAlbumDetail:
+    token = await _get_spotify_access_token()
+    album, track_items = await asyncio.gather(
+        _spotify_get(f"/albums/{album_id}", token, params={"market": "KR"}),
+        _spotify_get_all_pages(
+            f"/albums/{album_id}/tracks",
+            token,
+            params={"market": "KR", "limit": 50},
+        ),
+    )
+    summary = spotify_album_from_api_item(album)
+    tracks = [spotify_track_summary_from_api_item(item) for item in track_items]
+    return SpotifyAlbumDetail(**summary.model_dump(), tracks=tracks)
+
+
+async def _spotify_get(
+    path: str,
+    token: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"{SPOTIFY_API_URL}{path}",
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+        )
+        if response.is_error:
+            detail = response.text.strip() or f"Spotify API error ({response.status_code})"
+            raise SpotifyApiError(detail, response.status_code)
+        return response.json()
+
+
+async def _spotify_get_all_pages(
+    path: str,
+    token: str,
+    *,
+    params: dict[str, Any],
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    offset = 0
+    limit = int(params.get("limit", 10))
+    while True:
+        data = await _spotify_get(path, token, params={**params, "offset": offset})
+        items = list(data.get("items") or [])
+        results.extend(items)
+        if not data.get("next") or not items:
+            return results
+        offset += limit
+
+
+def spotify_artist_from_api_item(
+    local_artist_id: int,
+    item: dict[str, Any],
+) -> SpotifyArtistProfile:
+    images = item.get("images") or []
+    return SpotifyArtistProfile(
+        local_artist_id=local_artist_id,
+        spotify_artist_id=str(item["id"]),
+        name=str(item.get("name") or ""),
+        image_url=(images[0] or {}).get("url") if images else None,
+        spotify_url=(item.get("external_urls") or {}).get("spotify"),
+        genres=[str(genre) for genre in item.get("genres") or []],
+    )
+
+
+def spotify_album_from_api_item(item: dict[str, Any]) -> SpotifyAlbumSummary:
+    images = item.get("images") or []
+    artists = item.get("artists") or []
+    return SpotifyAlbumSummary(
+        id=str(item["id"]),
+        name=str(item.get("name") or ""),
+        album_type=str(item.get("album_type") or "album"),
+        release_date=item.get("release_date"),
+        release_date_precision=item.get("release_date_precision"),
+        total_tracks=int(item.get("total_tracks") or 0),
+        image_url=(images[0] or {}).get("url") if images else None,
+        spotify_url=(item.get("external_urls") or {}).get("spotify"),
+        artists=[str(artist.get("name") or "") for artist in artists if artist.get("name")],
+        artist_ids=[str(artist.get("id") or "") for artist in artists if artist.get("id")],
+    )
+
+
+def spotify_track_summary_from_api_item(item: dict[str, Any]) -> SpotifyTrackSummary:
+    artists = item.get("artists") or []
+    return SpotifyTrackSummary(
+        id=str(item["id"]),
+        name=str(item.get("name") or ""),
+        track_number=int(item.get("track_number") or 0),
+        disc_number=int(item.get("disc_number") or 1),
+        duration_ms=item.get("duration_ms"),
+        explicit=bool(item.get("explicit")),
+        spotify_url=(item.get("external_urls") or {}).get("spotify"),
+        artists=[str(artist.get("name") or "") for artist in artists if artist.get("name")],
+        artist_ids=[str(artist.get("id") or "") for artist in artists if artist.get("id")],
+    )
+
+
+def _normalize_name(value: str) -> str:
+    return "".join(character.lower() for character in value if character.isalnum())
 
 
 def spotify_track_from_api_item(item: dict[str, Any]) -> SpotifyTrackInfo:
