@@ -162,6 +162,48 @@ def get_notification_route(
     return route
 
 
+def set_source_active_for_user(
+    *,
+    discord_user_id: str,
+    source_id: int,
+    is_active: bool,
+) -> dict:
+    """Enable or disable a source visible to the requesting Discord user.
+
+    User-owned sources are restricted to their owner. Managed ``system:*``
+    sources are shared presets and may be controlled by a guild administrator.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE artist_sources s
+            SET is_active = %s, updated_at = CURRENT_TIMESTAMP
+            FROM artists a
+            WHERE s.id = %s
+                AND a.id = s.artist_id
+                AND (
+                    a.discord_user_id = %s
+                    OR a.discord_user_id LIKE 'system:%%'
+                )
+            RETURNING
+                s.id,
+                s.source_type,
+                s.label,
+                s.value,
+                s.is_active,
+                a.name AS artist_name,
+                a.display_name
+            """,
+            (is_active, source_id, discord_user_id),
+        ).fetchone()
+        conn.commit()
+
+    source = row_to_dict(row)
+    if source is None:
+        raise LookupError(f"source #{source_id}를 찾을 수 없거나 변경 권한이 없습니다.")
+    return source
+
+
 def find_notification_routes_for_item(
     *,
     source_id: int,

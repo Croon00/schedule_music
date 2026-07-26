@@ -25,6 +25,7 @@ from app.integrations.notifications import (
     delete_notification_route,
     get_notification_route,
     list_notification_routes,
+    set_source_active_for_user,
 )
 from app.integrations.spotify import SpotifyTrackInfo, search_spotify_track, spotify_configured
 from app.integrations.youtube_context import (
@@ -1050,6 +1051,62 @@ async def source_list(interaction: discord.Interaction) -> None:
 
     for message in _split_discord_message_lines(lines):
         await interaction.followup.send(message, ephemeral=True)
+
+
+async def _set_source_active_command(
+    interaction: discord.Interaction,
+    *,
+    source_id: int,
+    is_active: bool,
+) -> None:
+    """Apply a source state change after checking guild-management permission."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        source = set_source_active_for_user(
+            discord_user_id=str(interaction.user.id),
+            source_id=source_id,
+            is_active=is_active,
+        )
+    except (PermissionError, LookupError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("source #%s 상태 변경에 실패했습니다.", source_id)
+        await interaction.followup.send(
+            f"source 상태 변경에 실패했습니다: {exc}",
+            ephemeral=True,
+        )
+        return
+
+    state_label = "활성화" if source["is_active"] else "비활성화"
+    artist = source["display_name"] or source["artist_name"]
+    await interaction.followup.send(
+        f"source #{source['id']} {artist} / {source['value']} — {state_label} 완료",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="source_disable", description="X 소스 수집을 비활성화합니다.")
+@app_commands.describe(source_id="/source_list에서 확인한 source_id")
+async def source_disable(interaction: discord.Interaction, source_id: int) -> None:
+    """Stop polling one source without deleting its routes or history."""
+    await _set_source_active_command(
+        interaction,
+        source_id=source_id,
+        is_active=False,
+    )
+
+
+@bot.tree.command(name="source_enable", description="비활성화된 X 소스 수집을 다시 활성화합니다.")
+@app_commands.describe(source_id="/source_list에서 확인한 source_id")
+async def source_enable(interaction: discord.Interaction, source_id: int) -> None:
+    """Resume polling one source while preserving its routes and history."""
+    await _set_source_active_command(
+        interaction,
+        source_id=source_id,
+        is_active=True,
+    )
 
 
 @bot.tree.command(name="route_add", description="소스/글 타입별 Discord 알림 채널을 연결합니다.")
