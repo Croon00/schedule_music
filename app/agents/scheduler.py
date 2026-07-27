@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from psycopg import errors
 
@@ -325,42 +326,17 @@ def _build_notification_message(
     """Build a short Discord message for one classified source item."""
     labels = {
         "notice": "공지",
-        "release": "릴리즈",
-        "live_event": "라이브",
+        "release": "신곡",
+        "live_event": "live",
         "ticket": "티켓",
         "merch": "굿즈",
-        "irrelevant": "무시",
+        "irrelevant": "잡담",
     }
-    title = event["title"] if event and event.get("title") else _first_line(post.get("text", "새 글"))
     url = post_url(source["x_username"], post["id"])
-    lines = [
-        f"[{labels.get(item_type, item_type)}] {source['artist_name']}",
-        title,
-    ]
-
-    if event:
-        if event.get("starts_at"):
-            lines.append(f"일정: {event['starts_at']}")
-        if event.get("venue"):
-            lines.append(f"장소: {event['venue']}")
-        if event.get("ticket_opens_at"):
-            lines.append(f"티켓 시작: {event['ticket_opens_at']}")
-        if event.get("ticket_closes_at"):
-            lines.append(f"티켓 마감: {event['ticket_closes_at']}")
-        if event.get("ticket_url"):
-            lines.append(f"티켓 링크: {event['ticket_url']}")
-
-    excerpt = _truncate_text(post.get("text", ""), 600)
-    if excerpt and excerpt != title:
-        lines.extend(["", excerpt])
-    if item_type == "irrelevant":
-        lines.extend(["", "(분류 : 잡담)"])
-    elif classification_reason:
-        lines.extend(["", f"분류: `{item_type}` ({classification_reason})"])
-    lines.append(f"원문: {url}")
-
-    message = "\n".join(line for line in lines if line is not None)
-    return _truncate_text(message, 1900)
+    label = labels.get(item_type, item_type)
+    # A bare URL lets Discord render one X preview card. The post body is not
+    # repeated, so links inside the original post cannot create extra embeds.
+    return f"{source['artist_name']} (분류: {label})\n{url}"
 
 
 def _first_line(value: str) -> str:
@@ -397,8 +373,14 @@ def _extract_post_urls(post: dict[str, Any]) -> list[str]:
     urls = []
     for item in (post.get("entities") or {}).get("urls") or []:
         url = item.get("expanded_url") or item.get("unwound_url") or item.get("url")
-        if url and url not in urls:
-            urls.append(url)
+        if not url or url in urls:
+            continue
+        hostname = (urlparse(url).hostname or "").lower()
+        # X pages repeat the post and profile bio. That can make ordinary
+        # chatter look like a release when a bio contains "release" or "EP".
+        if hostname in {"x.com", "www.x.com", "twitter.com", "www.twitter.com"}:
+            continue
+        urls.append(url)
     return urls
 
 
