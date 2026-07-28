@@ -119,6 +119,40 @@ def google_connected(discord_user_id: str) -> bool:
     return get_google_token(discord_user_id) is not None
 
 
+def get_calendar_recipients_for_source(
+    *,
+    source_id: int,
+    source_owner_id: str,
+) -> list[str]:
+    """Return connected Google users who should receive this source's events.
+
+    Managed sources such as ``system:rkmusic`` have no Google login of their
+    own. Their recipients are users who used ``/route_add`` for the source and
+    completed ``/google_connect``. Connected owners remain supported for
+    user-owned sources.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT recipients.discord_user_id
+            FROM (
+                SELECT %s AS discord_user_id
+                UNION
+                SELECT r.discord_user_id
+                FROM notification_routes r
+                WHERE r.is_active = TRUE
+                    AND (r.source_id = %s OR r.source_id IS NULL)
+                    AND r.discord_user_id IS NOT NULL
+            ) recipients
+            JOIN google_oauth_tokens tokens
+                ON tokens.discord_user_id = recipients.discord_user_id
+            ORDER BY recipients.discord_user_id
+            """,
+            (source_owner_id, source_id),
+        ).fetchall()
+    return [str(row["discord_user_id"]) for row in rows]
+
+
 async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> str:
     """일정 후보 정보를 Google Calendar event로 생성하고 Google event id를 반환합니다."""
     token = get_google_token(discord_user_id)

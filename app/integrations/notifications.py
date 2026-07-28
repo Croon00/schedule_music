@@ -14,7 +14,6 @@ NotificationItemType = Literal[
     "ticket",
     "merch",
     "irrelevant",
-    "all_non_ticket",
 ]
 
 NOTIFICATION_ITEM_TYPES: tuple[str, ...] = (
@@ -24,8 +23,6 @@ NOTIFICATION_ITEM_TYPES: tuple[str, ...] = (
     "ticket",
     "merch",
     "irrelevant",
-    # Artist-specific catch-all: sends every classified post except tickets.
-    "all_non_ticket",
 )
 
 
@@ -50,12 +47,10 @@ def create_notification_route(
     *,
     discord_user_id: str,
     guild_id: str,
-    source_id: int | None,
-    item_type: str,
+    source_id: int,
     discord_channel_id: str,
 ) -> dict:
-    """Create a Discord routing rule for one source/type pair in one guild."""
-    normalized_item_type = normalize_item_type(item_type)
+    """Connect one X source to a Discord channel for every new post."""
     with get_connection() as conn:
         try:
             cursor = conn.execute(
@@ -70,7 +65,7 @@ def create_notification_route(
                     discord_user_id,
                     guild_id,
                     source_id,
-                    normalized_item_type,
+                    "all",
                     discord_channel_id,
                 ),
             )
@@ -207,11 +202,8 @@ def set_source_active_for_user(
 def find_notification_routes_for_item(
     *,
     source_id: int,
-    item_type: str,
 ) -> list[dict]:
-    """Return active exact routes plus artist-specific non-ticket catch-all routes."""
-    normalized_item_type = normalize_item_type(item_type)
-
+    """Return every active Discord route connected to this X source."""
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -224,17 +216,10 @@ def find_notification_routes_for_item(
             LEFT JOIN artist_sources s ON s.id = r.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             WHERE r.is_active = TRUE
-                AND (
-                    (r.item_type = %s AND (r.source_id = %s OR r.source_id IS NULL))
-                    OR (
-                        r.item_type = 'all_non_ticket'
-                        AND r.source_id = %s
-                        AND %s <> 'ticket'
-                    )
-                )
+                AND (r.source_id = %s OR r.source_id IS NULL)
             ORDER BY r.source_id NULLS LAST, r.id
             """,
-            (normalized_item_type, source_id, source_id, normalized_item_type),
+            (source_id,),
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 

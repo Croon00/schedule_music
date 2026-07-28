@@ -582,7 +582,7 @@ def _format_route(route: dict) -> str:
     artist_prefix = f"{artist} / " if artist else ""
     active_suffix = "" if route.get("is_active", True) else " (비활성)"
     return (
-        f"#{route['id']} `{route['item_type']}` "
+        f"#{route['id']} "
         f"{artist_prefix}{source} -> <#{route['discord_channel_id']}>{active_suffix}"
     )
 
@@ -1109,37 +1109,18 @@ async def source_enable(interaction: discord.Interaction, source_id: int) -> Non
     )
 
 
-@bot.tree.command(name="route_add", description="소스/글 타입별 Discord 알림 채널을 연결합니다.")
+@bot.tree.command(name="route_add", description="X 계정의 모든 새 게시글을 Discord 채널에 연결합니다.")
 @app_commands.describe(
-    item_type="글 타입 또는 all_non_ticket(아티스트별 티켓 외 전체 글)",
-    channel="알림을 보낼 Discord 채널",
-    source_id="/source_list에서 확인한 source_id. 비우면 서버 전체 기본 route로 사용합니다.",
-)
-@app_commands.choices(
-    item_type=[
-        app_commands.Choice(name="notice 일반 공지", value="notice"),
-        app_commands.Choice(name="release 음원/MV 릴리즈", value="release"),
-        app_commands.Choice(name="live_event 라이브/공연", value="live_event"),
-        app_commands.Choice(name="ticket 티켓/응모", value="ticket"),
-        app_commands.Choice(name="merch 굿즈/상품", value="merch"),
-        app_commands.Choice(name="all_non_ticket 티켓 외 모든 글", value="all_non_ticket"),
-    ]
+    channel="모든 새 게시글을 보낼 Discord 채널",
+    source_id="/source_list에서 확인한 X source_id",
 )
 async def route_add(
     interaction: discord.Interaction,
-    item_type: str,
     channel: discord.TextChannel,
-    source_id: int | None = None,
+    source_id: int,
 ) -> None:
-    """분류된 글 타입 또는 아티스트별 티켓 외 전체 글을 채널로 보냅니다."""
+    """Send every new post from one X source to a Discord channel."""
     await interaction.response.defer(ephemeral=True)
-    if item_type == "all_non_ticket" and source_id is None:
-        await interaction.followup.send(
-            "all_non_ticket은 아티스트별 설정입니다. /source_list의 source_id를 지정해주세요.",
-            ephemeral=True,
-        )
-        return
-
     try:
         _ensure_manage_guild(interaction)
         guild_id = _guild_id_from_interaction(interaction)
@@ -1147,7 +1128,6 @@ async def route_add(
             discord_user_id=str(interaction.user.id),
             guild_id=guild_id,
             source_id=source_id,
-            item_type=item_type,
             discord_channel_id=str(channel.id),
         )
     except (PermissionError, ValueError, LookupError, NotificationRouteConflictError) as exc:
@@ -1155,11 +1135,10 @@ async def route_add(
         return
     except Exception as exc:
         logger.exception("route_add 명령 처리에 실패했습니다.")
-        await interaction.followup.send(f"라우팅 저장에 실패했습니다: {exc}", ephemeral=True)
+        await interaction.followup.send(f"라우트 저장에 실패했습니다: {exc}", ephemeral=True)
         return
 
-    await interaction.followup.send(f"라우팅 추가 완료: {_format_route(route)}", ephemeral=True)
-
+    await interaction.followup.send(f"라우트 추가 완료: {_format_route(route)}", ephemeral=True)
 
 @bot.tree.command(name="route_list", description="현재 서버의 Discord 알림 라우팅 목록을 보여줍니다.")
 @app_commands.describe(source_id="선택: 특정 source_id만 조회합니다.")

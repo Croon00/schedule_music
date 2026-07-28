@@ -12,7 +12,10 @@ from psycopg import errors
 from app.core.config import settings
 from app.core.db import get_connection, init_db
 from app.agents.music_graph import run_music_item_graph
-from app.integrations.google_calendar import create_calendar_events, google_connected
+from app.integrations.google_calendar import (
+    create_calendar_events,
+    get_calendar_recipients_for_source,
+)
 from app.integrations.notifications import (
     find_notification_routes_for_item,
     update_source_item_classification,
@@ -121,16 +124,21 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
             event = _insert_event_candidate(source, post, extracted, raw_text)
             result["events_created"] += 1
 
-        if event and google_connected(source["discord_user_id"]):
-            provider_events = await create_calendar_events(source["discord_user_id"], event)
-            for event_type, provider_event_id in provider_events.items():
-                _insert_calendar_sync(
-                    source["discord_user_id"],
-                    event["id"],
-                    provider_event_id,
-                    event_type,
-                )
-                result["calendar_events_created"] += 1
+        if event:
+            calendar_recipients = get_calendar_recipients_for_source(
+                source_id=source["id"],
+                source_owner_id=source["discord_user_id"],
+            )
+            for discord_user_id in calendar_recipients:
+                provider_events = await create_calendar_events(discord_user_id, event)
+                for event_type, provider_event_id in provider_events.items():
+                    _insert_calendar_sync(
+                        discord_user_id,
+                        event["id"],
+                        provider_event_id,
+                        event_type,
+                    )
+                    result["calendar_events_created"] += 1
 
         notification_result = await _notify_discord_routes(
             source=source,
@@ -278,7 +286,7 @@ async def _notify_discord_routes(
     The agent can also be run from a CLI or tests without a logged-in Discord bot.
     In that case this function skips delivery instead of waiting forever.
     """
-    routes = find_notification_routes_for_item(source_id=source["id"], item_type=item_type)
+    routes = find_notification_routes_for_item(source_id=source["id"])
     if not routes:
         return {"sent": 0, "skipped": 0}
 
@@ -327,13 +335,18 @@ def _build_notification_message(
     labels = {
         "notice": "공지",
         "release": "신곡",
-        "live_event": "live",
+        "live_event": "!!라이브 정보",
         "ticket": "티켓",
         "merch": "굿즈",
         "irrelevant": "잡담",
     }
     url = post_url(source["x_username"], post["id"])
-    label = labels.get(item_type, item_type)
+    if item_type in {"live_event", "ticket"}:
+        return (
+            f"{source['artist_name']} "
+            f"(\ubd84\ub958: [!!\ub77c\uc774\ube0c \uc815\ubcf4])\n{url}"
+        )
+    label = "!!라이브 정보" if item_type in {"live_event", "ticket"} else labels.get(item_type, item_type)
     # A bare URL lets Discord render one X preview card. The post body is not
     # repeated, so links inside the original post cannot create extra embeds.
     return f"{source['artist_name']} (분류: {label})\n{url}"

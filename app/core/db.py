@@ -265,6 +265,19 @@ def init_db() -> None:
             )
             """
         )
+        # Routes used to be split by classification. Collapse them to one
+        # source/channel connection so every new post follows the same route.
+        conn.execute(
+            """
+            DELETE FROM notification_routes newer
+            USING notification_routes older
+            WHERE newer.id > older.id
+                AND newer.guild_id = older.guild_id
+                AND newer.source_id IS NOT DISTINCT FROM older.source_id
+                AND newer.discord_channel_id = older.discord_channel_id
+            """
+        )
+        conn.execute("UPDATE notification_routes SET item_type = 'all' WHERE item_type <> 'all'")
         _seed_rkmusic_x_sources(conn)
         _seed_artist_x_sources(
             conn,
