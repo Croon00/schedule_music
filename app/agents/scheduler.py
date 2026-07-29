@@ -334,7 +334,7 @@ def _build_notification_message(
     """Build a short Discord message for one classified source item."""
     labels = {
         "notice": "공지",
-        "release": "신곡",
+        "release": "음악",
         "live_event": "!!라이브 정보",
         "ticket": "티켓",
         "merch": "굿즈",

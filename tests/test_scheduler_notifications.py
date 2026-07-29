@@ -30,6 +30,19 @@ def test_ticket_is_also_marked_as_live_information() -> None:
     assert "(\ubd84\ub958: [!!\ub77c\uc774\ube0c \uc815\ubcf4])" in message
 
 
+def test_release_is_labeled_as_music() -> None:
+    message = _build_notification_message(
+        source={"artist_name": "HACHI", "x_username": "8HaChi_hacchi"},
+        post={"id": "2", "text": "new music body"},
+        item_type="release",
+        classification_reason=None,
+        event=None,
+    )
+
+    assert "(분류: 음악)" in message
+    assert "신곡" not in message
+
+
 def test_x_status_and_media_urls_are_not_used_as_page_context() -> None:
     post = {
         "entities": {
