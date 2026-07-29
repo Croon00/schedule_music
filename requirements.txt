@@ -6,6 +6,7 @@ discord.py==2.4.0
 openai==1.93.0
 langgraph>=0.2.0
 httpx==0.28.1
+twscrape[curl]==0.19.2
 pytest==8.3.4
 youtube-transcript-api==1.2.4
 yt-dlp>=2024.12.23

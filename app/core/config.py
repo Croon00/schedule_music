@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,7 +16,12 @@ class Settings(BaseSettings):
     agent_run_on_start: bool = False
     database_auto_init: bool = False
     public_base_url: str | None = None
+    x_provider: Literal["auto", "twscrape", "x_api"] = "auto"
     x_bearer_token: str | None = None
+    twscrape_auth_token: str | None = None
+    twscrape_ct0: str | None = None
+    twscrape_username: str = "schedule_music"
+    twscrape_db_path: str = "data/twscrape_accounts.db"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
     openai_audio_model: str = "whisper-1"
@@ -44,6 +51,8 @@ class Settings(BaseSettings):
         "discord_guild_id",
         "public_base_url",
         "x_bearer_token",
+        "twscrape_auth_token",
+        "twscrape_ct0",
         "openai_api_key",
         "youtube_transcript_proxy_http_url",
         "youtube_transcript_proxy_https_url",
