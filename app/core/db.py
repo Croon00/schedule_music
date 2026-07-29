@@ -36,7 +36,7 @@ RK_MUSIC_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("YONO", "Yono_RKMusic"),
     ("MEMESIA", "MEMESIA_0224"),
     ("LEWNE", "LEWNE_1123"),
-    ("羽緒", "Hao_1211"),
+    ("羽緒", "Hao_RKM"),
     ("Cil", "Cil_0320"),
     ("深影", "Mikage_0916"),
     ("wouca", "wouca_rkm"),
@@ -46,6 +46,9 @@ RK_MUSIC_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("NUROJUNK", "NUROJUNK"),
 )
 RK_MUSIC_SYSTEM_USER_ID = "system:rkmusic"
+RK_MUSIC_X_SOURCE_RENAMES: dict[tuple[str, str], str] = {
+    ("羽緒", "Hao_1211"): "Hao_RKM",
+}
 
 ADDITIONAL_ARTIST_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("Aimer", "Aimer_and_staff"),
@@ -96,6 +99,38 @@ def _seed_rkmusic_x_sources(conn: Connection) -> None:
                     "Official RK Music X source (managed preset)",
                 ),
             ).fetchone()
+
+        for (renamed_artist, old_username), new_username in (
+            RK_MUSIC_X_SOURCE_RENAMES.items()
+        ):
+            if renamed_artist != artist_name or new_username != x_username:
+                continue
+            conn.execute(
+                """
+                UPDATE artist_sources
+                SET
+                    value = %s,
+                    external_user_id = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE artist_id = %s
+                    AND source_type = 'x'
+                    AND value = %s
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM artist_sources existing
+                        WHERE existing.artist_id = %s
+                            AND existing.source_type = 'x'
+                            AND existing.value = %s
+                    )
+                """,
+                (
+                    new_username,
+                    artist["id"],
+                    old_username,
+                    artist["id"],
+                    new_username,
+                ),
+            )
 
         conn.execute(
             """
