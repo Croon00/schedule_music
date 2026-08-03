@@ -33,6 +33,10 @@ from app.integrations.youtube_context import (
     fetch_top_comment,
     fetch_video_description,
 )
+from app.integrations.youtube_live_archive import (
+    get_youtube_live_archive,
+    list_youtube_live_archives,
+)
 from app.lyrics_pipeline.clients import (
     OpenAiLyricsClient,
     OpenAiSpeechToTextClient,
@@ -1230,6 +1234,91 @@ async def google_connect(interaction: discord.Interaction) -> None:
         f"아래 링크에서 Google Calendar를 연결하세요.\n{auth_url}",
         ephemeral=True,
     )
+
+
+@bot.tree.command(
+    name="youtube_live_list",
+    description="최근 YouTube 라이브 노래 기록을 조회합니다.",
+)
+async def youtube_live_list(interaction: discord.Interaction) -> None:
+    """List recent YouTube lives waiting for or containing a parsed setlist."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        archives = list_youtube_live_archives()
+    except Exception:
+        logger.exception("/youtube_live_list 조회에 실패했습니다.")
+        await interaction.followup.send(
+            "YouTube 라이브 기록을 조회하지 못했습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not archives:
+        await interaction.followup.send(
+            "아직 저장된 YouTube 라이브 기록이 없습니다.",
+            ephemeral=True,
+        )
+        return
+
+    lines = []
+    for archive in archives:
+        setlist = archive["setlist"] or []
+        state = f"{len(setlist)}곡" if setlist else "댓글 확인 대기"
+        lines.append(
+            f"#{archive['id']} {archive['artist_name']} — {state}\n"
+            f"{archive['youtube_url']}"
+        )
+    for message in _split_discord_message_lines(lines):
+        await interaction.followup.send(message, ephemeral=True)
+
+
+@bot.tree.command(
+    name="youtube_live_show",
+    description="YouTube 라이브의 타임스탬프별 노래 기록을 봅니다.",
+)
+@app_commands.describe(archive_id="/youtube_live_list에서 확인한 기록 ID")
+async def youtube_live_show(
+    interaction: discord.Interaction,
+    archive_id: int,
+) -> None:
+    """Show one archived YouTube live setlist."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        archive = get_youtube_live_archive(archive_id)
+    except Exception:
+        logger.exception("/youtube_live_show 조회에 실패했습니다.")
+        await interaction.followup.send(
+            "YouTube 라이브 기록을 조회하지 못했습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if archive is None:
+        await interaction.followup.send(
+            f"기록 #{archive_id}를 찾을 수 없습니다.",
+            ephemeral=True,
+        )
+        return
+
+    setlist = archive["setlist"] or []
+    if not setlist:
+        await interaction.followup.send(
+            f"{archive['artist_name']} — 아직 타임스탬프 댓글을 기다리는 중입니다.\n"
+            f"{archive['youtube_url']}",
+            ephemeral=True,
+        )
+        return
+
+    lines = [
+        f"{archive['artist_name']} YouTube 라이브 #{archive_id}",
+        archive["youtube_url"],
+        "",
+    ]
+    lines.extend(
+        f"{entry['timestamp']} — {entry['title']}" for entry in setlist
+    )
+    for message in _split_discord_message_lines(lines):
+        await interaction.followup.send(message, ephemeral=True)
 
 
 @bot.tree.command(

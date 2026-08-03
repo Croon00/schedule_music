@@ -22,6 +22,11 @@ from app.integrations.notifications import (
 )
 from app.integrations.web_pages import fetch_public_page_text
 from app.integrations.x_client import fetch_recent_posts, get_x_user_id, post_url, x_configured
+from app.integrations.youtube_live_archive import (
+    refresh_pending_youtube_lives,
+    register_youtube_live,
+)
+from app.lyrics_pipeline.youtube import extract_youtube_video_id
 
 logger = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
@@ -59,8 +64,12 @@ async def run_agent_once() -> dict[str, int]:
         "calendar_events_created": 0,
         "notifications_sent": 0,
         "notifications_skipped": 0,
+        "youtube_live_archives_updated": 0,
     }
     if not rows or not x_configured():
+        result["youtube_live_archives_updated"] = (
+            await _refresh_youtube_live_archives_safely()
+        )
         return result
 
     for source in rows:
@@ -71,6 +80,9 @@ async def run_agent_once() -> dict[str, int]:
         except Exception:
             logger.exception("출처 %s 처리 중 agent가 실패했습니다.", source["id"])
 
+    result["youtube_live_archives_updated"] = (
+        await _refresh_youtube_live_archives_safely()
+    )
     return result
 
 
@@ -114,6 +126,12 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
             confidence=graph_state.get("classification_confidence"),
         )
         result["posts_classified"] += 1
+        if item_type == "live_event":
+            _register_youtube_live_links(
+                source_item_id=source_item_id,
+                source_id=source["id"],
+                post=post,
+            )
 
         event = None
         extracted = graph_state.get("event_extraction")
@@ -341,6 +359,8 @@ def _build_notification_message(
         "irrelevant": "잡담",
     }
     url = post_url(source["x_username"], post["id"])
+    if item_type == "live_event" and _youtube_urls(post):
+        return f"{source['artist_name']} (분류: 유튜브 라이브)\n{url}"
     if item_type in {"live_event", "ticket"}:
         return (
             f"{source['artist_name']} "
@@ -395,6 +415,53 @@ def _extract_post_urls(post: dict[str, Any]) -> list[str]:
             continue
         urls.append(url)
     return urls
+
+
+def _youtube_urls(post: dict[str, Any]) -> list[str]:
+    """Return linked YouTube URLs from an X post."""
+    youtube_hosts = {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+    }
+    return [
+        url
+        for url in _extract_post_urls(post)
+        if (urlparse(url).hostname or "").lower() in youtube_hosts
+    ]
+
+
+def _register_youtube_live_links(
+    *,
+    source_item_id: int,
+    source_id: int,
+    post: dict[str, Any],
+) -> None:
+    """Queue linked YouTube lives for post-stream setlist collection."""
+    for url in _youtube_urls(post):
+        try:
+            video_id = extract_youtube_video_id(url)
+        except ValueError:
+            logger.info("YouTube video ID를 찾지 못해 기록을 건너뜁니다: %s", url)
+            continue
+        register_youtube_live(
+            source_item_id=source_item_id,
+            source_id=source_id,
+            youtube_video_id=video_id,
+            youtube_url=url,
+        )
+
+
+async def _refresh_youtube_live_archives_safely() -> int:
+    """Refresh archives without allowing YouTube failures to stop X polling."""
+    try:
+        return await refresh_pending_youtube_lives()
+    except Exception:
+        logger.exception("YouTube live archive refresh failed.")
+        return 0
 
 
 def _combine_raw_text(post_text: str, page_context: str | None) -> str:

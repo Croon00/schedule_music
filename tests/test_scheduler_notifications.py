@@ -30,6 +30,28 @@ def test_ticket_is_also_marked_as_live_information() -> None:
     assert "(\ubd84\ub958: [!!\ub77c\uc774\ube0c \uc815\ubcf4])" in message
 
 
+def test_youtube_live_is_labeled_separately() -> None:
+    message = _build_notification_message(
+        source={"artist_name": "HACHI", "x_username": "8HaChi_hacchi"},
+        post={
+            "id": "3",
+            "text": "YouTube live",
+            "entities": {
+                "urls": [
+                    {
+                        "expanded_url": "https://www.youtube.com/watch?v=abcdefghijk"
+                    }
+                ]
+            },
+        },
+        item_type="live_event",
+        classification_reason=None,
+        event=None,
+    )
+
+    assert "(분류: 유튜브 라이브)" in message
+
+
 def test_release_is_labeled_as_music() -> None:
     message = _build_notification_message(
         source={"artist_name": "HACHI", "x_username": "8HaChi_hacchi"},

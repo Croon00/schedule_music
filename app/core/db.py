@@ -64,6 +64,16 @@ ADDITIONAL_ARTIST_X_SOURCES: tuple[tuple[str, str], ...] = (
 )
 ADDITIONAL_ARTISTS_SYSTEM_USER_ID = "system:additional-artists"
 
+# Official member accounts linked from KAMITSUBAKI STUDIO's V.W.P artist pages.
+VWP_X_SOURCES: tuple[tuple[str, str], ...] = (
+    ("花譜", "virtual_kaf"),
+    ("理芽", "RIM_virtual"),
+    ("春猿火", "harusaruhi"),
+    ("ヰ世界情緒", "isekaijoucho"),
+    ("幸祜", "KOKO__virtual"),
+)
+VWP_SYSTEM_USER_ID = "system:vwp"
+
 
 def get_connection() -> Connection:
     """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환합니다."""
@@ -285,6 +295,28 @@ def init_db() -> None:
         conn.execute("ALTER TABLE source_items ADD COLUMN IF NOT EXISTS classification_confidence DOUBLE PRECISION")
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS youtube_live_archives (
+                id SERIAL PRIMARY KEY,
+                source_item_id INTEGER NOT NULL,
+                source_id INTEGER NOT NULL,
+                youtube_video_id TEXT NOT NULL,
+                youtube_url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                top_comment TEXT,
+                setlist JSONB NOT NULL DEFAULT '[]'::jsonb,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_check_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (source_item_id) REFERENCES source_items(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_id) REFERENCES artist_sources(id) ON DELETE CASCADE,
+                UNIQUE (source_item_id, youtube_video_id)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_routes (
                 id SERIAL PRIMARY KEY,
                 discord_user_id TEXT,
@@ -319,6 +351,12 @@ def init_db() -> None:
             owner_id=ADDITIONAL_ARTISTS_SYSTEM_USER_ID,
             sources=ADDITIONAL_ARTIST_X_SOURCES,
             note="Official X source (managed preset)",
+        )
+        _seed_artist_x_sources(
+            conn,
+            owner_id=VWP_SYSTEM_USER_ID,
+            sources=VWP_X_SOURCES,
+            note="Official V.W.P member X source (managed preset)",
         )
         conn.execute(
             """
