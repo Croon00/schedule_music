@@ -381,10 +381,10 @@ def search_youtube_song_performances(
             LEFT JOIN artist_sources s ON s.id = y.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             WHERE (
-                %s IS NULL
+                %s::text IS NULL
                 OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%'
             ) AND (
-                %s IS NULL
+                %s::text IS NULL
                 OR p.song_title ILIKE '%%' || %s || '%%'
             )
             ORDER BY p.performed_on DESC, p.start_seconds, p.id
