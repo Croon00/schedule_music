@@ -234,23 +234,24 @@ def _replace_song_performances(
             "DELETE FROM youtube_song_performances WHERE archive_id = %s",
             (archive_id,),
         )
-        conn.executemany(
-            """
-            INSERT INTO youtube_song_performances (
-                archive_id, performed_on, start_seconds, timestamp_text, song_title
-            ) VALUES (%s, %s, %s, %s, %s)
-            """,
-            [
-                (
-                    archive_id,
-                    performed_on.date(),
-                    _timestamp_to_seconds(entry["timestamp"]),
-                    entry["timestamp"],
-                    split_song_credit(entry["title"])[0],
-                )
-                for entry in setlist
-            ],
-        )
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO youtube_song_performances (
+                    archive_id, performed_on, start_seconds, timestamp_text, song_title
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                [
+                    (
+                        archive_id,
+                        performed_on.date(),
+                        _timestamp_to_seconds(entry["timestamp"]),
+                        entry["timestamp"],
+                        split_song_credit(entry["title"])[0],
+                    )
+                    for entry in setlist
+                ],
+            )
         conn.commit()
 
 
@@ -273,17 +274,18 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
     songs = [split_song_credit(entry["title"]) for entry in raw_setlist]
     matches = await lookup_karaoke_numbers(songs)
     with get_connection() as conn:
-        conn.executemany(
-            """
-            UPDATE youtube_song_performances SET original_artist = %s,
-                tj_number = %s, ky_number = %s, karaoke_checked_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            [
-                (match.original_artist, match.tj_number, match.ky_number, row["id"])
-                for row, match in zip(rows, matches, strict=False)
-            ],
-        )
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE youtube_song_performances SET original_artist = %s,
+                    tj_number = %s, ky_number = %s, karaoke_checked_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                [
+                    (match.original_artist, match.tj_number, match.ky_number, row["id"])
+                    for row, match in zip(rows, matches, strict=False)
+                ],
+            )
         conn.commit()
 
 
