@@ -22,6 +22,12 @@ def test_parse_setlist_comment_ignores_comment_without_timestamps() -> None:
     assert parse_setlist_comment("楽しい配信でした！") == []
 
 
+def test_parse_setlist_comment_accepts_numbered_rows() -> None:
+    assert parse_setlist_comment("4  . 07:36 アポリア/ヨルシカ") == [
+        {"timestamp": "07:36", "title": "アポリア/ヨルシカ"}
+    ]
+
+
 def test_timestamp_to_seconds_supports_hour_timestamp() -> None:
     assert _timestamp_to_seconds("1:04:59") == 3899
     assert _timestamp_to_seconds("12:03") == 723
@@ -30,3 +36,5 @@ def test_timestamp_to_seconds_supports_hour_timestamp() -> None:
 def test_split_song_credit_allows_missing_artist() -> None:
     assert split_song_credit("アイドル / YOASOBI") == ("アイドル", "YOASOBI")
     assert split_song_credit("名前のない歌") == ("名前のない歌", None)
+    assert split_song_credit("アポリア/ヨルシカ") == ("アポリア", "ヨルシカ")
+    assert split_song_credit("雨うつつ/") == ("雨うつつ", None)

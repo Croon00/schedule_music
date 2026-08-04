@@ -15,8 +15,9 @@ from app.lyrics_pipeline.youtube import canonical_youtube_watch_url, extract_you
 
 logger = logging.getLogger(__name__)
 TIMESTAMP_LINE_RE = re.compile(
-    r"^\s*(?P<timestamp>(?:\d{1,2}:)?\d{1,2}:\d{2})"
-    r"(?:\s*[-–—|｜:：]\s*|\s+)"
+    r"^\s*(?:\d+\s*[.)．]\s*)?"
+    r"(?P<timestamp>(?:\d{1,2}:)?\d{1,2}:\d{2})"
+    r"(?:\s*[-–—|｜:：.]?\s*)"
     r"(?P<title>.+?)\s*$"
 )
 MAX_ARCHIVE_ATTEMPTS = 168

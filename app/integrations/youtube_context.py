@@ -150,7 +150,11 @@ async def fetch_setlist_comment(video_id: str, max_pages: int = 3) -> YouTubeCon
     def timestamp_line_count(text: str) -> int:
         return sum(
             1 for line in text.splitlines()
-            if re.match(r"^\s*(?:\d{1,2}:)?\d{1,2}:\d{2}(?:\s|[-|｜–—])", line)
+            if re.match(
+                r"^\s*(?:\d+\s*[.)．]\s*)?"
+                r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?:\s|[-|｜–—.])",
+                line,
+            )
         )
 
     best = max(candidates, key=timestamp_line_count, default="")

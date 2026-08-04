@@ -20,11 +20,13 @@ class KaraokeMatch:
 def split_song_credit(value: str) -> tuple[str, str | None]:
     """Split common setlist forms such as `song / artist` without requiring a credit."""
     cleaned = value.strip()
-    for separator in (" / ", " ／ ", "｜", " | "):
+    for separator in (" / ", " ／ ", "｜", " | ", "/", "／"):
         if separator in cleaned:
             title, artist = cleaned.rsplit(separator, 1)
             if title.strip() and artist.strip():
                 return title.strip(), artist.strip()
+            if title.strip() and not artist.strip():
+                return title.strip(), None
     match = re.match(r"^(?P<title>.+?)\s+[（(](?:原曲|original)[:：]?\s*(?P<artist>.+?)[）)]$", cleaned, re.I)
     if match:
         return match.group("title").strip(), match.group("artist").strip()
