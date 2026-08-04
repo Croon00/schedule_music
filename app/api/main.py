@@ -28,6 +28,7 @@ from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
     list_youtube_live_archives,
+    search_youtube_song_performances,
 )
 from app.integrations.spotify import (
     SpotifyAlbumDetail,
@@ -108,6 +109,22 @@ def get_youtube_live(archive_id: int) -> dict:
     if archive is None:
         raise HTTPException(status_code=404, detail="YouTube 라이브 기록을 찾지 못했습니다.")
     return archive
+
+
+@app.get("/youtube-performances")
+def search_youtube_performances(
+    artist_name: str | None = None,
+    song_title: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    try:
+        return search_youtube_song_performances(
+            artist_name=artist_name,
+            song_title=song_title,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/namuwiki/song-article", response_model=NamuWikiSongArticleResponse)

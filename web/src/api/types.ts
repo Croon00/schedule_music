@@ -133,6 +133,13 @@ export interface YouTubePerformance {
   original_artist: string | null; tj_number: string; ky_number: string
 }
 
+export interface YouTubePerformanceSearchResult extends YouTubePerformance {
+  archive_id: number
+  artist_name: string
+  youtube_url: string
+  video_title: string | null
+}
+
 export interface YouTubeLiveArchive {
   id: number; youtube_url: string; video_title: string | null; artist_name: string
   status: 'pending' | 'ready'; published_at: string | null; broadcast_at: string | null

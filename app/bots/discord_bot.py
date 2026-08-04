@@ -37,6 +37,7 @@ from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
     list_youtube_live_archives,
+    search_youtube_song_performances,
 )
 from app.lyrics_pipeline.clients import (
     OpenAiLyricsClient,
@@ -1360,6 +1361,65 @@ async def youtube_live_show(
             f" · TJ {entry['tj_number']} · 금영 {entry['ky_number']}"
         )
     for message in _split_discord_message_lines(lines):
+        await interaction.followup.send(message, ephemeral=True)
+
+
+def _youtube_performance_lines(rows: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for row in rows:
+        credit = f" / {row['original_artist']}" if row.get("original_artist") else ""
+        timed_url = f"{row['youtube_url']}&t={row['start_seconds']}s"
+        lines.append(
+            f"{row['performed_on']} · {row['artist_name']}\n"
+            f"{row['timestamp_text']} — {row['song_title']}{credit}\n"
+            f"TJ {row['tj_number']} · 금영 {row['ky_number']}\n{timed_url}"
+        )
+    return lines
+
+
+@bot.tree.command(
+    name="youtube_songs_by_artist",
+    description="아티스트가 지금까지 부른 YouTube 곡을 날짜별로 조회합니다.",
+)
+@app_commands.describe(artist_name="조회할 아티스트 이름")
+async def youtube_songs_by_artist(
+    interaction: discord.Interaction,
+    artist_name: str,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        rows = search_youtube_song_performances(artist_name=artist_name)
+    except Exception:
+        logger.exception("/youtube_songs_by_artist failed")
+        await interaction.followup.send("곡 기록을 조회하지 못했습니다.", ephemeral=True)
+        return
+    if not rows:
+        await interaction.followup.send(f"{artist_name}의 저장된 곡 기록이 없습니다.", ephemeral=True)
+        return
+    for message in _split_discord_message_lines(_youtube_performance_lines(rows)):
+        await interaction.followup.send(message, ephemeral=True)
+
+
+@bot.tree.command(
+    name="youtube_song_search",
+    description="곡 제목으로 누가 언제 YouTube에서 불렀는지 조회합니다.",
+)
+@app_commands.describe(song_title="조회할 곡 제목")
+async def youtube_song_search(
+    interaction: discord.Interaction,
+    song_title: str,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        rows = search_youtube_song_performances(song_title=song_title)
+    except Exception:
+        logger.exception("/youtube_song_search failed")
+        await interaction.followup.send("곡 기록을 조회하지 못했습니다.", ephemeral=True)
+        return
+    if not rows:
+        await interaction.followup.send(f"{song_title}의 저장된 가창 기록이 없습니다.", ephemeral=True)
+        return
+    for message in _split_discord_message_lines(_youtube_performance_lines(rows)):
         await interaction.followup.send(message, ephemeral=True)
 
 

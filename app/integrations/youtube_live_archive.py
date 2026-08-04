@@ -346,3 +346,49 @@ def get_youtube_live_archive(archive_id: int) -> dict[str, Any] | None:
             (archive_id,),
         ).fetchall()
         return archive
+
+
+def search_youtube_song_performances(
+    *,
+    artist_name: str | None = None,
+    song_title: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Search every archived performance by performer or song title."""
+    artist_query = artist_name.strip() if artist_name else None
+    song_query = song_title.strip() if song_title else None
+    if not artist_query and not song_query:
+        raise ValueError("artist_name 또는 song_title 중 하나가 필요합니다.")
+
+    with get_connection() as conn:
+        return conn.execute(
+            """
+            SELECT
+                p.id,
+                p.archive_id,
+                p.performed_on,
+                p.start_seconds,
+                p.timestamp_text,
+                p.song_title,
+                p.original_artist,
+                p.tj_number,
+                p.ky_number,
+                y.youtube_url,
+                y.video_title,
+                COALESCE(a.name, y.performer_name, y.video_title, 'YouTube') AS artist_name
+            FROM youtube_song_performances p
+            JOIN youtube_live_archives y ON y.id = p.archive_id
+            LEFT JOIN artist_sources s ON s.id = y.source_id
+            LEFT JOIN artists a ON a.id = s.artist_id
+            WHERE (
+                %s IS NULL
+                OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%'
+            ) AND (
+                %s IS NULL
+                OR p.song_title ILIKE '%%' || %s || '%%'
+            )
+            ORDER BY p.performed_on DESC, p.start_seconds, p.id
+            LIMIT %s
+            """,
+            (artist_query, artist_query, song_query, song_query, max(1, min(limit, 500))),
+        ).fetchall()
