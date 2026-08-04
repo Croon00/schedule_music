@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import logging
+import re
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+
+from app.core.config import settings
+from app.core.db import get_connection
+from app.integrations.youtube_context import YOUTUBE_API_BASE_URL
+from app.integrations.youtube_live_archive import add_youtube_live_url
+
+
+logger = logging.getLogger(__name__)
+CHANNEL_ID_RE = re.compile(r"^UC[\w-]{20,}$")
+
+
+def _channel_locator(channel_url: str) -> tuple[str, str]:
+    parsed = urlparse(channel_url.strip())
+    if (parsed.hostname or "").lower() not in {
+        "youtube.com", "www.youtube.com", "m.youtube.com"
+    }:
+        raise ValueError("youtube.com 채널 URL을 입력해 주세요.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "channel" and CHANNEL_ID_RE.match(parts[1]):
+        return "id", parts[1]
+    if parts and parts[0].startswith("@") and len(parts[0]) > 1:
+        return "handle", parts[0][1:]
+    raise ValueError("/@handle 또는 /channel/UC... 형식의 채널 URL을 입력해 주세요.")
+
+
+async def resolve_youtube_channel(channel_url: str) -> dict[str, str]:
+    if not settings.youtube_api_key:
+        raise RuntimeError("YOUTUBE_API_KEY가 설정되지 않았습니다.")
+    locator_type, locator = _channel_locator(channel_url)
+    params = {
+        "part": "snippet,contentDetails",
+        "key": settings.youtube_api_key,
+        "id" if locator_type == "id" else "forHandle": locator,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(f"{YOUTUBE_API_BASE_URL}/channels", params=params)
+        response.raise_for_status()
+        items = response.json().get("items") or []
+    if not items:
+        raise ValueError("YouTube 채널을 찾을 수 없습니다.")
+    item = items[0]
+    uploads = (((item.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads"))
+    if not uploads:
+        raise ValueError("채널의 업로드 목록을 찾을 수 없습니다.")
+    return {
+        "youtube_channel_id": item["id"],
+        "channel_title": (item.get("snippet") or {}).get("title") or locator,
+        "channel_url": f"https://www.youtube.com/channel/{item['id']}",
+        "uploads_playlist_id": uploads,
+    }
+
+
+async def create_youtube_channel_monitor(
+    *, discord_user_id: str, artist_name: str, channel_url: str
+) -> dict[str, Any]:
+    channel = await resolve_youtube_channel(channel_url)
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO youtube_channel_monitors (
+                discord_user_id, artist_name, youtube_channel_id, channel_title,
+                channel_url, uploads_playlist_id
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (discord_user_id, youtube_channel_id) DO UPDATE SET
+                artist_name = EXCLUDED.artist_name,
+                channel_title = EXCLUDED.channel_title,
+                channel_url = EXCLUDED.channel_url,
+                uploads_playlist_id = EXCLUDED.uploads_playlist_id,
+                is_active = TRUE,
+                next_check_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING *
+            """,
+            (
+                discord_user_id, artist_name.strip(), channel["youtube_channel_id"],
+                channel["channel_title"], channel["channel_url"],
+                channel["uploads_playlist_id"],
+            ),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
+def list_youtube_channel_monitors(discord_user_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        return conn.execute(
+            """SELECT * FROM youtube_channel_monitors
+               WHERE discord_user_id = %s ORDER BY artist_name, id""",
+            (discord_user_id,),
+        ).fetchall()
+
+
+def delete_youtube_channel_monitor(monitor_id: int, discord_user_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM youtube_channel_monitors WHERE id = %s AND discord_user_id = %s",
+            (monitor_id, discord_user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+async def poll_youtube_channel_monitors(
+    *, monitor_id: int | None = None, limit: int = 25
+) -> dict[str, int]:
+    if not settings.youtube_api_key:
+        return {"channels_checked": 0, "videos_found": 0, "archives_created": 0}
+    with get_connection() as conn:
+        monitors = conn.execute(
+            """
+            SELECT * FROM youtube_channel_monitors
+            WHERE is_active = TRUE
+              AND (%s::integer IS NULL OR id = %s)
+              AND (%s::integer IS NOT NULL OR next_check_at <= CURRENT_TIMESTAMP)
+            ORDER BY next_check_at, id LIMIT %s
+            """,
+            (monitor_id, monitor_id, monitor_id, limit),
+        ).fetchall()
+
+    result = {"channels_checked": 0, "videos_found": 0, "archives_created": 0}
+    for monitor in monitors:
+        try:
+            videos = await _fetch_recent_singing_streams(monitor["uploads_playlist_id"])
+            result["channels_checked"] += 1
+            result["videos_found"] += len(videos)
+            _upsert_channel_videos(monitor["id"], videos)
+            result["archives_created"] += await _collect_due_videos(monitor)
+            _mark_monitor_checked(monitor["id"])
+        except Exception as exc:
+            logger.exception("YouTube channel monitor #%s failed", monitor["id"])
+            _mark_monitor_checked(monitor["id"], error=str(exc))
+    return result
+
+
+async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=30) as client:
+        playlist_response = await client.get(
+            f"{YOUTUBE_API_BASE_URL}/playlistItems",
+            params={
+                "part": "snippet,contentDetails", "playlistId": uploads_playlist_id,
+                "maxResults": "50", "key": settings.youtube_api_key,
+            },
+        )
+        playlist_response.raise_for_status()
+        candidates = [
+            {"id": (item.get("contentDetails") or {}).get("videoId"),
+             "title": (item.get("snippet") or {}).get("title") or ""}
+            for item in playlist_response.json().get("items") or []
+            if "歌枠" in ((item.get("snippet") or {}).get("title") or "")
+        ]
+        ids = [item["id"] for item in candidates if item["id"]]
+        if not ids:
+            return []
+        videos_response = await client.get(
+            f"{YOUTUBE_API_BASE_URL}/videos",
+            params={
+                "part": "snippet,liveStreamingDetails", "id": ",".join(ids),
+                "key": settings.youtube_api_key,
+            },
+        )
+        videos_response.raise_for_status()
+    return [
+        {
+            "youtube_video_id": item["id"],
+            "video_title": (item.get("snippet") or {}).get("title") or "",
+            "actual_end_at": _parse_datetime(
+                (item.get("liveStreamingDetails") or {}).get("actualEndTime")
+            ),
+        }
+        for item in videos_response.json().get("items") or []
+    ]
+
+
+def _upsert_channel_videos(monitor_id: int, videos: list[dict[str, Any]]) -> None:
+    with get_connection() as conn:
+        for video in videos:
+            end_at = video["actual_end_at"]
+            conn.execute(
+                """
+                INSERT INTO youtube_channel_videos (
+                    monitor_id, youtube_video_id, video_title, actual_end_at, collect_after
+                ) VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (monitor_id, youtube_video_id) DO UPDATE SET
+                    video_title = EXCLUDED.video_title,
+                    actual_end_at = COALESCE(EXCLUDED.actual_end_at, youtube_channel_videos.actual_end_at),
+                    collect_after = COALESCE(EXCLUDED.collect_after, youtube_channel_videos.collect_after),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    monitor_id, video["youtube_video_id"], video["video_title"],
+                    end_at, end_at + timedelta(hours=24) if end_at else None,
+                ),
+            )
+        conn.commit()
+
+
+async def _collect_due_videos(monitor: dict[str, Any]) -> int:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, youtube_video_id FROM youtube_channel_videos
+            WHERE monitor_id = %s AND status <> 'processed'
+              AND collect_after IS NOT NULL AND collect_after <= CURRENT_TIMESTAMP
+            ORDER BY collect_after, id
+            """,
+            (monitor["id"],),
+        ).fetchall()
+    processed = 0
+    for row in rows:
+        try:
+            archive_id = await add_youtube_live_url(
+                f"https://www.youtube.com/watch?v={row['youtube_video_id']}",
+                monitor["artist_name"],
+            )
+            with get_connection() as conn:
+                conn.execute(
+                    """UPDATE youtube_channel_videos SET status = 'processed', archive_id = %s,
+                       last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = %s""",
+                    (archive_id, row["id"]),
+                )
+                conn.commit()
+            processed += 1
+        except Exception as exc:
+            with get_connection() as conn:
+                conn.execute(
+                    """UPDATE youtube_channel_videos SET status = 'retry', last_error = %s,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = %s""",
+                    (str(exc)[:1000], row["id"]),
+                )
+                conn.commit()
+    return processed
+
+
+def _mark_monitor_checked(monitor_id: int, error: str | None = None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """UPDATE youtube_channel_monitors SET last_checked_at = CURRENT_TIMESTAMP,
+               next_check_at = CURRENT_TIMESTAMP + INTERVAL '1 day',
+               updated_at = CURRENT_TIMESTAMP WHERE id = %s""",
+            (monitor_id,),
+        )
+        conn.commit()

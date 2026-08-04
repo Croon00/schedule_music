@@ -39,6 +39,12 @@ from app.integrations.youtube_live_archive import (
     list_youtube_live_archives,
     search_youtube_song_performances,
 )
+from app.integrations.youtube_channel_monitor import (
+    create_youtube_channel_monitor,
+    delete_youtube_channel_monitor,
+    list_youtube_channel_monitors,
+    poll_youtube_channel_monitors,
+)
 from app.lyrics_pipeline.clients import (
     OpenAiLyricsClient,
     OpenAiSpeechToTextClient,
@@ -1266,6 +1272,106 @@ async def youtube_live_add(
     await interaction.followup.send(
         f"#{archive_id} · {date_text} · {len(setlist)}곡을 저장했습니다.\n"
         f"/youtube_live_show archive_id:{archive_id} 로 확인할 수 있습니다.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="youtube_channel_add",
+    description="YouTube 채널을 하루 1회 감시하도록 등록합니다.",
+)
+@app_commands.describe(
+    artist_name="채널에서 노래를 부르는 아티스트 이름",
+    channel_url="https://youtube.com/@handle 또는 /channel/UC... URL",
+)
+async def youtube_channel_add(
+    interaction: discord.Interaction,
+    artist_name: str,
+    channel_url: str,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        monitor = await create_youtube_channel_monitor(
+            discord_user_id=str(interaction.user.id),
+            artist_name=artist_name,
+            channel_url=channel_url,
+        )
+        result = await poll_youtube_channel_monitors(monitor_id=monitor["id"])
+    except (ValueError, RuntimeError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception:
+        logger.exception("/youtube_channel_add failed")
+        await interaction.followup.send("YouTube 채널을 등록하지 못했습니다.", ephemeral=True)
+        return
+    await interaction.followup.send(
+        f"#{monitor['id']} {monitor['artist_name']} · {monitor['channel_title']} 등록 완료\n"
+        f"하루 1회 확인 · 종료 24시간이 지난 `歌枠` 자동 저장\n"
+        f"이번 확인: 영상 {result['videos_found']}개 발견, "
+        f"아카이브 {result['archives_created']}개 처리",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="youtube_channel_list",
+    description="내가 등록한 YouTube 채널 감시 목록을 봅니다.",
+)
+async def youtube_channel_list(interaction: discord.Interaction) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        rows = list_youtube_channel_monitors(str(interaction.user.id))
+    except Exception:
+        logger.exception("/youtube_channel_list failed")
+        await interaction.followup.send("채널 목록을 조회하지 못했습니다.", ephemeral=True)
+        return
+    if not rows:
+        await interaction.followup.send("등록한 YouTube 감시 채널이 없습니다.", ephemeral=True)
+        return
+    lines = [
+        f"#{row['id']} {row['artist_name']} · {row['channel_title']}\n"
+        f"{row['channel_url']} · 다음 확인 {row['next_check_at']}"
+        for row in rows
+    ]
+    for message in _split_discord_message_lines(lines):
+        await interaction.followup.send(message, ephemeral=True)
+
+
+@bot.tree.command(
+    name="youtube_channel_delete",
+    description="등록한 YouTube 채널 감시를 삭제합니다.",
+)
+@app_commands.describe(monitor_id="/youtube_channel_list에서 확인한 ID")
+async def youtube_channel_delete(
+    interaction: discord.Interaction,
+    monitor_id: int,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    deleted = delete_youtube_channel_monitor(monitor_id, str(interaction.user.id))
+    await interaction.followup.send(
+        f"채널 감시 #{monitor_id} 삭제 완료" if deleted else "해당 채널 감시를 찾을 수 없습니다.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
+    name="youtube_channel_check",
+    description="등록한 YouTube 채널을 지금 즉시 확인합니다.",
+)
+@app_commands.describe(monitor_id="/youtube_channel_list에서 확인한 ID")
+async def youtube_channel_check(
+    interaction: discord.Interaction,
+    monitor_id: int,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    owned = {row["id"] for row in list_youtube_channel_monitors(str(interaction.user.id))}
+    if monitor_id not in owned:
+        await interaction.followup.send("해당 채널 감시를 찾을 수 없습니다.", ephemeral=True)
+        return
+    result = await poll_youtube_channel_monitors(monitor_id=monitor_id)
+    await interaction.followup.send(
+        f"확인 완료: `歌枠` {result['videos_found']}개, "
+        f"24시간 경과 아카이브 {result['archives_created']}개 처리",
         ephemeral=True,
     )
 

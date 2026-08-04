@@ -26,6 +26,7 @@ from app.integrations.youtube_live_archive import (
     refresh_pending_youtube_lives,
     register_youtube_live,
 )
+from app.integrations.youtube_channel_monitor import poll_youtube_channel_monitors
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
 
 logger = logging.getLogger(__name__)
@@ -65,11 +66,16 @@ async def run_agent_once() -> dict[str, int]:
         "notifications_sent": 0,
         "notifications_skipped": 0,
         "youtube_live_archives_updated": 0,
+        "youtube_channels_checked": 0,
+        "youtube_channel_archives_created": 0,
     }
     if not rows or not x_configured():
         result["youtube_live_archives_updated"] = (
             await _refresh_youtube_live_archives_safely()
         )
+        channel_result = await _poll_youtube_channels_safely()
+        result["youtube_channels_checked"] = channel_result["channels_checked"]
+        result["youtube_channel_archives_created"] = channel_result["archives_created"]
         return result
 
     for source in rows:
@@ -83,7 +89,18 @@ async def run_agent_once() -> dict[str, int]:
     result["youtube_live_archives_updated"] = (
         await _refresh_youtube_live_archives_safely()
     )
+    channel_result = await _poll_youtube_channels_safely()
+    result["youtube_channels_checked"] = channel_result["channels_checked"]
+    result["youtube_channel_archives_created"] = channel_result["archives_created"]
     return result
+
+
+async def _poll_youtube_channels_safely() -> dict[str, int]:
+    try:
+        return await poll_youtube_channel_monitors()
+    except Exception:
+        logger.exception("YouTube channel monitor polling failed.")
+        return {"channels_checked": 0, "videos_found": 0, "archives_created": 0}
 
 
 async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:

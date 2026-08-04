@@ -366,6 +366,45 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS youtube_channel_monitors (
+                id SERIAL PRIMARY KEY,
+                discord_user_id TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                youtube_channel_id TEXT NOT NULL,
+                channel_title TEXT NOT NULL,
+                channel_url TEXT NOT NULL,
+                uploads_playlist_id TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                last_checked_at TIMESTAMPTZ,
+                next_check_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (discord_user_id, youtube_channel_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS youtube_channel_videos (
+                id SERIAL PRIMARY KEY,
+                monitor_id INTEGER NOT NULL,
+                youtube_video_id TEXT NOT NULL,
+                video_title TEXT NOT NULL,
+                actual_end_at TIMESTAMPTZ,
+                collect_after TIMESTAMPTZ,
+                status TEXT NOT NULL DEFAULT 'waiting',
+                archive_id INTEGER,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (monitor_id) REFERENCES youtube_channel_monitors(id) ON DELETE CASCADE,
+                FOREIGN KEY (archive_id) REFERENCES youtube_live_archives(id) ON DELETE SET NULL,
+                UNIQUE (monitor_id, youtube_video_id)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_routes (
                 id SERIAL PRIMARY KEY,
                 discord_user_id TEXT,
