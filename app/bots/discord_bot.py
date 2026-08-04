@@ -1366,13 +1366,28 @@ async def youtube_live_show(
 
 def _youtube_performance_lines(rows: list[dict]) -> list[str]:
     lines: list[str] = []
+    current_date = None
+    current_archive_id = None
     for row in rows:
+        if row["performed_on"] != current_date:
+            if lines:
+                lines.append("")
+            current_date = row["performed_on"]
+            current_archive_id = None
+            lines.append(f"## {current_date}")
+
+        if row["archive_id"] != current_archive_id:
+            if current_archive_id is not None:
+                lines.append("")
+            current_archive_id = row["archive_id"]
+            video_title = row.get("video_title") or "YouTube 라이브"
+            lines.append(f"**{row['artist_name']} · {video_title}**")
+
         credit = f" / {row['original_artist']}" if row.get("original_artist") else ""
         timed_url = f"{row['youtube_url']}&t={row['start_seconds']}s"
         lines.append(
-            f"{row['performed_on']} · {row['artist_name']}\n"
-            f"{row['timestamp_text']} — {row['song_title']}{credit}\n"
-            f"TJ {row['tj_number']} · 금영 {row['ky_number']}\n{timed_url}"
+            f"{row['timestamp_text']} — **{row['song_title']}**{credit}\n"
+            f"TJ {row['tj_number']} · 금영 {row['ky_number']} · <{timed_url}>"
         )
     return lines
 
