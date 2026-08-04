@@ -7,6 +7,7 @@ export const router = createRouter({
     { path: '/artists', name: 'artists', component: () => import('@/pages/ArtistsPage.vue') },
     { path: '/events', name: 'events', component: () => import('@/pages/EventsPage.vue') },
     { path: '/music', name: 'music', component: () => import('@/pages/MusicLibraryPage.vue') },
+    { path: '/youtube-lives', name: 'youtube-lives', component: () => import('@/pages/YouTubeLivesPage.vue') },
     { path: '/wiki', name: 'wiki', component: () => import('@/pages/WikiStudioPage.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },

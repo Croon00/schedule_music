@@ -12,6 +12,7 @@ import type {
   SpotifyAlbumDetail,
   SpotifyArtist,
   SpotifyRelationship,
+  YouTubeLiveArchive,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api-proxy').replace(/\/$/, '')
@@ -70,6 +71,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+  },
+  youtubeLives: {
+    list: (artistName?: string) => request<YouTubeLiveArchive[]>(`/youtube-lives${artistName ? `?artist_name=${encodeURIComponent(artistName)}` : ''}`),
+    get: (id: number) => request<YouTubeLiveArchive>(`/youtube-lives/${id}`),
+    create: (youtubeUrl: string, artistName: string) => request<YouTubeLiveArchive>('/youtube-lives', {
+      method: 'POST', body: JSON.stringify({ youtube_url: youtubeUrl, artist_name: artistName }),
+    }),
   },
   google: {
     connectUrl: (discordUserId: string) =>

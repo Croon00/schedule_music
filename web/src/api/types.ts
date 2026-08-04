@@ -127,3 +127,15 @@ export interface SpotifyRelationship {
   strength: number
   shared_releases: string[]
 }
+
+export interface YouTubePerformance {
+  id: number; performed_on: string; start_seconds: number; timestamp_text: string; song_title: string
+  original_artist: string | null; tj_number: string; ky_number: string
+}
+
+export interface YouTubeLiveArchive {
+  id: number; youtube_url: string; video_title: string | null; artist_name: string
+  status: 'pending' | 'ready'; published_at: string | null; broadcast_at: string | null
+  setlist: Array<{ timestamp: string; title: string }>; performances?: YouTubePerformance[]
+  last_checked_at: string | null
+}

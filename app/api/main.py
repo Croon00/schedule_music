@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel, HttpUrl
 from psycopg import Connection, errors
 
 from app.core.config import settings
@@ -22,6 +23,11 @@ from app.integrations.google_calendar import (
     build_google_auth_url,
     exchange_code_for_tokens,
     google_oauth_configured,
+)
+from app.integrations.youtube_live_archive import (
+    add_youtube_live_url,
+    get_youtube_live_archive,
+    list_youtube_live_archives,
 )
 from app.integrations.spotify import (
     SpotifyAlbumDetail,
@@ -64,10 +70,44 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 
+class YouTubeLiveCreate(BaseModel):
+    youtube_url: HttpUrl
+    artist_name: str
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """배포된 API 서버가 살아 있는지 확인하는 헬스 체크입니다."""
     return {"status": "ok"}
+
+
+@app.post("/youtube-lives", status_code=status.HTTP_201_CREATED)
+async def create_youtube_live(payload: YouTubeLiveCreate) -> dict:
+    try:
+        archive_id = await add_youtube_live_url(str(payload.youtube_url), payload.artist_name)
+        archive = get_youtube_live_archive(archive_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="YouTube 정보를 가져오지 못했습니다.") from exc
+    if archive is None:
+        raise HTTPException(status_code=500, detail="저장된 기록을 찾지 못했습니다.")
+    return archive
+
+
+@app.get("/youtube-lives")
+def get_youtube_lives(limit: int = 50, artist_name: str | None = None) -> list[dict]:
+    return list_youtube_live_archives(
+        limit=max(1, min(limit, 100)), artist_name=artist_name.strip() if artist_name else None
+    )
+
+
+@app.get("/youtube-lives/{archive_id}")
+def get_youtube_live(archive_id: int) -> dict:
+    archive = get_youtube_live_archive(archive_id)
+    if archive is None:
+        raise HTTPException(status_code=404, detail="YouTube 라이브 기록을 찾지 못했습니다.")
+    return archive
 
 
 @app.post("/namuwiki/song-article", response_model=NamuWikiSongArticleResponse)

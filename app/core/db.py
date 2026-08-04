@@ -297,10 +297,14 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS youtube_live_archives (
                 id SERIAL PRIMARY KEY,
-                source_item_id INTEGER NOT NULL,
-                source_id INTEGER NOT NULL,
+                source_item_id INTEGER,
+                source_id INTEGER,
                 youtube_video_id TEXT NOT NULL,
                 youtube_url TEXT NOT NULL,
+                performer_name TEXT,
+                video_title TEXT,
+                published_at TIMESTAMPTZ,
+                broadcast_at TIMESTAMPTZ,
                 status TEXT NOT NULL DEFAULT 'pending',
                 top_comment TEXT,
                 setlist JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -314,6 +318,39 @@ def init_db() -> None:
                 UNIQUE (source_item_id, youtube_video_id)
             )
             """
+        )
+        conn.execute("ALTER TABLE youtube_live_archives ALTER COLUMN source_item_id DROP NOT NULL")
+        conn.execute("ALTER TABLE youtube_live_archives ALTER COLUMN source_id DROP NOT NULL")
+        conn.execute("ALTER TABLE youtube_live_archives ADD COLUMN IF NOT EXISTS video_title TEXT")
+        conn.execute("ALTER TABLE youtube_live_archives ADD COLUMN IF NOT EXISTS performer_name TEXT")
+        conn.execute("ALTER TABLE youtube_live_archives ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ")
+        conn.execute("ALTER TABLE youtube_live_archives ADD COLUMN IF NOT EXISTS broadcast_at TIMESTAMPTZ")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS youtube_song_performances (
+                id SERIAL PRIMARY KEY,
+                archive_id INTEGER NOT NULL,
+                performed_on DATE NOT NULL,
+                start_seconds INTEGER NOT NULL,
+                timestamp_text TEXT NOT NULL,
+                song_title TEXT NOT NULL,
+                original_artist TEXT,
+                tj_number TEXT NOT NULL DEFAULT '등록X',
+                ky_number TEXT NOT NULL DEFAULT '등록X',
+                karaoke_checked_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (archive_id) REFERENCES youtube_live_archives(id) ON DELETE CASCADE,
+                UNIQUE (archive_id, start_seconds, song_title)
+            )
+            """
+        )
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS original_artist TEXT")
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS tj_number TEXT NOT NULL DEFAULT '등록X'")
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS ky_number TEXT NOT NULL DEFAULT '등록X'")
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS karaoke_checked_at TIMESTAMPTZ")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS youtube_song_performances_title_date_idx "
+            "ON youtube_song_performances (song_title, performed_on DESC)"
         )
         conn.execute(
             """

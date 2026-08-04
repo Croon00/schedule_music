@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 
 import httpx
 from openai import AsyncOpenAI
@@ -30,6 +32,13 @@ LYRICS_CONTEXT_SCHEMA = {
 class YouTubeContextText:
     source: str
     text: str
+
+
+@dataclass(frozen=True)
+class YouTubeVideoMetadata:
+    title: str
+    published_at: datetime | None
+    broadcast_at: datetime | None
 
 
 def youtube_data_api_configured() -> bool:
@@ -62,6 +71,92 @@ async def fetch_video_description(video_id: str) -> YouTubeContextText | None:
     if not description:
         return None
     return YouTubeContextText(source="description", text=description)
+
+
+async def fetch_video_metadata(video_id: str) -> YouTubeVideoMetadata | None:
+    """Return the video title and the best available stream/publication dates."""
+    if not settings.youtube_api_key:
+        raise RuntimeError("YOUTUBE_API_KEY is not configured.")
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"{YOUTUBE_API_BASE_URL}/videos",
+            params={
+                "part": "snippet,liveStreamingDetails",
+                "id": video_id,
+                "key": settings.youtube_api_key,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    items = data.get("items") or []
+    if not items:
+        return None
+    item = items[0]
+    snippet = item.get("snippet") or {}
+    live = item.get("liveStreamingDetails") or {}
+    return YouTubeVideoMetadata(
+        title=(snippet.get("title") or "").strip(),
+        published_at=_parse_youtube_datetime(snippet.get("publishedAt")),
+        broadcast_at=_parse_youtube_datetime(
+            live.get("actualStartTime") or live.get("scheduledStartTime")
+        ),
+    )
+
+
+def _parse_youtube_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+async def fetch_setlist_comment(video_id: str, max_pages: int = 3) -> YouTubeContextText | None:
+    """Find the comment containing the most timestamp/song-looking lines."""
+    if not settings.youtube_api_key:
+        raise RuntimeError("YOUTUBE_API_KEY is not configured.")
+
+    candidates: list[str] = []
+    page_token: str | None = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        for _ in range(max_pages):
+            params = {
+                "part": "snippet",
+                "videoId": video_id,
+                "maxResults": "100",
+                "order": "relevance",
+                "textFormat": "plainText",
+                "key": settings.youtube_api_key,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            response = await client.get(
+                f"{YOUTUBE_API_BASE_URL}/commentThreads", params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+            for item in data.get("items") or []:
+                snippet = (
+                    ((item.get("snippet") or {}).get("topLevelComment") or {}).get("snippet")
+                    or {}
+                )
+                text = (snippet.get("textOriginal") or snippet.get("textDisplay") or "").strip()
+                if text:
+                    candidates.append(text)
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+    def timestamp_line_count(text: str) -> int:
+        return sum(
+            1 for line in text.splitlines()
+            if re.match(r"^\s*(?:\d{1,2}:)?\d{1,2}:\d{2}(?:\s|[-|｜–—])", line)
+        )
+
+    best = max(candidates, key=timestamp_line_count, default="")
+    if not best or timestamp_line_count(best) == 0:
+        return None
+    return YouTubeContextText(source="setlist_comment", text=best)
 
 
 async def fetch_top_comment(video_id: str) -> YouTubeContextText | None:

@@ -34,6 +34,7 @@ from app.integrations.youtube_context import (
     fetch_video_description,
 )
 from app.integrations.youtube_live_archive import (
+    add_youtube_live_url,
     get_youtube_live_archive,
     list_youtube_live_archives,
 )
@@ -1237,14 +1238,50 @@ async def google_connect(interaction: discord.Interaction) -> None:
 
 
 @bot.tree.command(
+    name="youtube_live_add",
+    description="YouTube 우타와꾸 URL의 방송일과 댓글 셋리스트를 저장합니다.",
+)
+@app_commands.describe(youtube_url="저장할 YouTube 우타와꾸 URL", artist_name="노래를 부른 아티스트 이름")
+async def youtube_live_add(
+    interaction: discord.Interaction,
+    youtube_url: str,
+    artist_name: str,
+) -> None:
+    await interaction.response.defer(ephemeral=True)
+    try:
+        archive_id = await add_youtube_live_url(youtube_url, artist_name)
+        archive = get_youtube_live_archive(archive_id)
+    except Exception:
+        logger.exception("/youtube_live_add failed")
+        await interaction.followup.send(
+            "YouTube 정보를 가져오지 못했습니다. URL과 YOUTUBE_API_KEY를 확인해 주세요.",
+            ephemeral=True,
+        )
+        return
+
+    setlist = archive["setlist"] or []
+    performed_at = archive.get("broadcast_at") or archive.get("published_at")
+    date_text = performed_at.astimezone().strftime("%Y년 %m월 %d일") if performed_at else "날짜 미확인"
+    await interaction.followup.send(
+        f"#{archive_id} · {date_text} · {len(setlist)}곡을 저장했습니다.\n"
+        f"/youtube_live_show archive_id:{archive_id} 로 확인할 수 있습니다.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(
     name="youtube_live_list",
     description="최근 YouTube 라이브 노래 기록을 조회합니다.",
 )
-async def youtube_live_list(interaction: discord.Interaction) -> None:
+@app_commands.describe(artist_name="조회할 아티스트 이름; 비우면 전체 조회")
+async def youtube_live_list(
+    interaction: discord.Interaction,
+    artist_name: str | None = None,
+) -> None:
     """List recent YouTube lives waiting for or containing a parsed setlist."""
     await interaction.response.defer(ephemeral=True)
     try:
-        archives = list_youtube_live_archives()
+        archives = list_youtube_live_archives(artist_name=artist_name)
     except Exception:
         logger.exception("/youtube_live_list 조회에 실패했습니다.")
         await interaction.followup.send(
@@ -1264,8 +1301,10 @@ async def youtube_live_list(interaction: discord.Interaction) -> None:
     for archive in archives:
         setlist = archive["setlist"] or []
         state = f"{len(setlist)}곡" if setlist else "댓글 확인 대기"
+        performed_at = archive.get("broadcast_at") or archive.get("published_at")
+        date_text = performed_at.astimezone().strftime("%Y-%m-%d") if performed_at else "날짜 미확인"
         lines.append(
-            f"#{archive['id']} {archive['artist_name']} — {state}\n"
+            f"#{archive['id']} {archive['artist_name']} — {date_text} — {state}\n"
             f"{archive['youtube_url']}"
         )
     for message in _split_discord_message_lines(lines):
@@ -1300,8 +1339,8 @@ async def youtube_live_show(
         )
         return
 
-    setlist = archive["setlist"] or []
-    if not setlist:
+    performances = archive["performances"] or []
+    if not performances:
         await interaction.followup.send(
             f"{archive['artist_name']} — 아직 타임스탬프 댓글을 기다리는 중입니다.\n"
             f"{archive['youtube_url']}",
@@ -1314,9 +1353,12 @@ async def youtube_live_show(
         archive["youtube_url"],
         "",
     ]
-    lines.extend(
-        f"{entry['timestamp']} — {entry['title']}" for entry in setlist
-    )
+    for entry in performances:
+        credit = f" / {entry['original_artist']}" if entry.get("original_artist") else ""
+        lines.append(
+            f"{entry['timestamp_text']} — {entry['song_title']}{credit}"
+            f" · TJ {entry['tj_number']} · 금영 {entry['ky_number']}"
+        )
     for message in _split_discord_message_lines(lines):
         await interaction.followup.send(message, ephemeral=True)
 

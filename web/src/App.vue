@@ -11,6 +11,7 @@ const navigation = [
   { to: '/artists', label: '아티스트 · 소스', icon: '◉' },
   { to: '/events', label: '일정 후보', icon: '◇' },
   { to: '/music', label: 'Spotify 음악', icon: '♫' },
+  { to: '/youtube-lives', label: 'YouTube 우타와꾸', icon: 'YT' },
   { to: '/wiki', label: 'Wiki Studio', icon: '✦' },
   { to: '/settings', label: '연동 설정', icon: '⚙' },
 ]
