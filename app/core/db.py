@@ -64,6 +64,18 @@ ADDITIONAL_ARTIST_X_SOURCES: tuple[tuple[str, str], ...] = (
 )
 ADDITIONAL_ARTISTS_SYSTEM_USER_ID = "system:additional-artists"
 
+VTUBER_X_SOURCES: tuple[tuple[str, str], ...] = (
+    ("MOCO", "hth_moco"),
+    ("BAMBI", "hth_bambi"),
+    ("SAKUYA", "NUROJUNK_SAKUYA"),
+    ("KAGURA", "NJ_KAGURA"),
+    ("Enma_Ruri", "Ruri_Enma"),
+    ("Setono_Toto", "setono_toto1010"),
+    ("Setono_Toto", "setono_toto_sub"),
+    ("Minase_Nagi", "minase_nagi7"),
+)
+VTUBER_SYSTEM_USER_ID = "system:vtuber-sources"
+
 # Official member accounts linked from KAMITSUBAKI STUDIO's V.W.P artist pages.
 VWP_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("花譜", "virtual_kaf"),
@@ -394,6 +406,12 @@ def init_db() -> None:
             owner_id=VWP_SYSTEM_USER_ID,
             sources=VWP_X_SOURCES,
             note="Official V.W.P member X source (managed preset)",
+        )
+        _seed_artist_x_sources(
+            conn,
+            owner_id=VTUBER_SYSTEM_USER_ID,
+            sources=VTUBER_X_SOURCES,
+            note="Official VTuber X source (managed preset)",
         )
         conn.execute(
             """
