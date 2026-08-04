@@ -150,15 +150,17 @@ async def fetch_setlist_comment(video_id: str, max_pages: int = 3) -> YouTubeCon
     def timestamp_line_count(text: str) -> int:
         return sum(
             1 for line in text.splitlines()
-            if re.match(
-                r"^\s*(?:\d+\s*[.)．]\s*)?"
-                r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?:\s|[-|｜–—.])",
+            if re.search(
+                r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
+                r"(?:\s|[-|｜–—.])",
                 line,
             )
         )
 
     best = max(candidates, key=timestamp_line_count, default="")
-    if not best or timestamp_line_count(best) == 0:
+    # A lone timestamp is usually a reaction such as "33:06 88888" rather
+    # than a setlist. Require repeated timestamped rows in one comment.
+    if not best or timestamp_line_count(best) < 2:
         return None
     return YouTubeContextText(source="setlist_comment", text=best)
 

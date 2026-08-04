@@ -15,8 +15,7 @@ from app.lyrics_pipeline.youtube import canonical_youtube_watch_url, extract_you
 
 logger = logging.getLogger(__name__)
 TIMESTAMP_LINE_RE = re.compile(
-    r"^\s*(?:\d+\s*[.)．]\s*)?"
-    r"(?P<timestamp>(?:\d{1,2}:)?\d{1,2}:\d{2})"
+    r"(?<!\d)(?P<timestamp>(?:\d{1,2}:)?\d{1,2}:\d{2})(?!\d)"
     r"(?:\s*[-–—|｜:：.]?\s*)"
     r"(?P<title>.+?)\s*$"
 )
@@ -109,7 +108,7 @@ def parse_setlist_comment(text: str) -> list[dict[str, str]]:
     """Extract timestamp/song pairs from a YouTube top comment."""
     entries: list[dict[str, str]] = []
     for line in text.splitlines():
-        match = TIMESTAMP_LINE_RE.match(line)
+        match = TIMESTAMP_LINE_RE.search(line)
         if not match:
             continue
         entries.append(

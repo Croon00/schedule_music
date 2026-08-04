@@ -28,6 +28,17 @@ def test_parse_setlist_comment_accepts_numbered_rows() -> None:
     ]
 
 
+def test_parse_setlist_comment_accepts_arbitrary_prefixes() -> None:
+    comment = """
+    🎵 M4 [추천] 07:36 アポリア/ヨルシカ
+    ▶ 네 번째 곡은 12:57 若者のすべて/フジファブリック
+    """
+    assert parse_setlist_comment(comment) == [
+        {"timestamp": "07:36", "title": "アポリア/ヨルシカ"},
+        {"timestamp": "12:57", "title": "若者のすべて/フジファブリック"},
+    ]
+
+
 def test_timestamp_to_seconds_supports_hour_timestamp() -> None:
     assert _timestamp_to_seconds("1:04:59") == 3899
     assert _timestamp_to_seconds("12:03") == 723
