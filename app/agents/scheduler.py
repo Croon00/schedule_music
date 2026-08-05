@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ from app.integrations.google_calendar import (
     create_calendar_events,
     get_calendar_recipients_for_source,
 )
+from app.integrations.ai_extractor import infer_event_format
 from app.integrations.notifications import (
     find_notification_routes_for_item,
     update_source_item_classification,
@@ -152,14 +154,31 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
 
         event = None
         extracted = graph_state.get("event_extraction")
+        detected_format = (
+            extracted.get("event_format", "unknown")
+            if extracted
+            else infer_event_format(
+                raw_text=raw_text,
+                page_context=page_context,
+                ticket_url=next(iter(_youtube_urls(post)), None),
+            )
+        )
+        if (
+            item_type == "live_event"
+            and detected_format == "online"
+        ):
+            # Keep source_items for deduplication and the dedicated YouTube-live archive,
+            # but do not turn online-only streams into schedule candidates or alerts.
+            result["notifications_skipped"] += 1
+            continue
         if extracted:
             _normalize_ticket_open_from_post(post, extracted)
             _normalize_live_date_from_post(post, extracted)
 
-            event = _insert_event_candidate(source, post, extracted, raw_text)
+            event = _insert_event_candidate(source, post, extracted, raw_text, item_type)
             result["events_created"] += 1
 
-        if event:
+        if event and event.get("event_format") not in {"online", "unknown"}:
             calendar_recipients = get_calendar_recipients_for_source(
                 source_id=source["id"],
                 source_owner_id=source["discord_user_id"],
@@ -254,23 +273,26 @@ def _insert_event_candidate(
     post: dict[str, Any],
     extracted: dict[str, Any],
     raw_text: str,
+    item_type: str,
 ) -> dict[str, Any]:
     """AI가 추출한 공연/예매 정보를 일정 후보 테이블에 저장합니다."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
             INSERT INTO event_candidates (
-                artist_id, discord_user_id, source_id, title, starts_at, venue,
+                artist_id, discord_user_id, source_id, event_type, event_format, title, starts_at, venue,
                 ticket_opens_at, ticket_closes_at, ticket_url, price_text,
                 source_url, raw_text, status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready')
             RETURNING *
             """,
             (
                 source["artist_id"],
                 source["discord_user_id"],
                 source["id"],
+                item_type if item_type in {"live_event", "ticket"} else "live_event",
+                extracted.get("event_format", "unknown"),
                 extracted["title"],
                 extracted.get("starts_at"),
                 extracted.get("venue"),
@@ -502,26 +524,39 @@ def _normalize_ticket_open_from_post(post: dict[str, Any], extracted: dict[str, 
 
 
 def _normalize_live_date_from_post(post: dict[str, Any], extracted: dict[str, Any]) -> None:
-    """Infer the first live date from compact Japanese M.D date notation."""
-    if extracted.get("starts_at") or not extracted.get("is_live_event"):
+    """Resolve yearless and relative live dates against the source post timestamp."""
+    if not extracted.get("is_live_event"):
         return
 
     published_at = _parse_datetime(post.get("created_at"))
     if not published_at:
         return
 
-    match = re.search(r"(?<!\d)(1[0-2]|0?[1-9])\.(3[01]|[12]\d|0?[1-9])(?!\d)", post.get("text", ""))
-    if not match:
+    text = unicodedata.normalize("NFKC", post.get("text", ""))
+    date_match = re.search(
+        r"(?<!\d)(1[0-2]|0?[1-9])\s*[./月]\s*(3[01]|[12]\d|0?[1-9])(?:日)?(?!\d)",
+        text,
+    )
+    is_today = bool(re.search(r"(?:本日|今日|today|오늘)", text, re.IGNORECASE))
+    if not date_match and not is_today:
         return
 
-    month = int(match.group(1))
-    day = int(match.group(2))
     local_published = published_at.astimezone(JST)
-    year = local_published.year
-    if (month, day) < (local_published.month, local_published.day):
-        year += 1
+    if date_match:
+        month = int(date_match.group(1))
+        day = int(date_match.group(2))
+        year = local_published.year
+        if (month, day) < (local_published.month, local_published.day):
+            year += 1
+    else:
+        year, month, day = local_published.year, local_published.month, local_published.day
 
-    extracted["starts_at"] = f"{year:04d}-{month:02d}-{day:02d}"
+    time_match = re.search(r"(?<!\d)([01]?\d|2[0-3])\s*[:：]\s*([0-5]\d)", text)
+    if time_match:
+        hour, minute = int(time_match.group(1)), int(time_match.group(2))
+        extracted["starts_at"] = datetime(year, month, day, hour, minute, tzinfo=JST).isoformat()
+    else:
+        extracted["starts_at"] = f"{year:04d}-{month:02d}-{day:02d}"
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

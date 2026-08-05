@@ -12,6 +12,8 @@ import type {
   SpotifyAlbumDetail,
   SpotifyArtist,
   SpotifyRelationship,
+  EventType,
+  EventFormat,
   YouTubeLiveArchive,
   YouTubePerformanceSearchResult,
 } from './types'
@@ -63,10 +65,17 @@ export const api = {
       request<void>(`/artists/${artistId}/sources/${sourceId}`, { method: 'DELETE' }),
   },
   events: {
-    list: (status?: CandidateStatus) =>
-      request<EventCandidate[]>(
-        `/event-candidates${status ? `?status_filter=${encodeURIComponent(status)}` : ''}`,
-      ),
+    list: (status?: CandidateStatus, artistId?: number, eventType?: EventType, eventFormat?: EventFormat) => {
+      const params = new URLSearchParams()
+      if (status) params.set('status_filter', status)
+      if (artistId) params.set('artist_id', String(artistId))
+      if (eventType) params.set('event_type', eventType)
+      if (eventFormat) params.set('event_format', eventFormat)
+      const query = params.toString()
+      return request<EventCandidate[]>(
+        `/event-candidates${query ? `?${query}` : ''}`,
+      )
+    },
     create: (payload: EventCandidateCreate) =>
       request<EventCandidate>('/event-candidates', {
         method: 'POST',

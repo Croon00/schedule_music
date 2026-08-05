@@ -1,5 +1,7 @@
 export type SourceType = 'x' | 'official_site' | 'ticket_site' | 'rss' | 'other'
 export type CandidateStatus = 'needs_review' | 'ready' | 'synced' | 'ignored'
+export type EventType = 'live_event' | 'ticket'
+export type EventFormat = 'onsite' | 'hybrid' | 'online' | 'unknown'
 
 export interface Source {
   id: number
@@ -17,6 +19,8 @@ export interface Artist {
   name: string
   display_name: string | null
   notes: string | null
+  spotify_image_url: string | null
+  representative_youtube_url: string | null
   created_at: string
   updated_at: string
   sources: Source[]
@@ -40,6 +44,8 @@ export interface EventCandidate {
   id: number
   artist_id: number | null
   source_id: number | null
+  event_type: EventType
+  event_format: EventFormat
   title: string
   starts_at: string | null
   venue: string | null

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+import unicodedata
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import psycopg
@@ -241,6 +244,8 @@ def init_db() -> None:
                 artist_id INTEGER,
                 discord_user_id TEXT,
                 source_id INTEGER,
+                event_type TEXT NOT NULL DEFAULT 'live_event',
+                event_format TEXT NOT NULL DEFAULT 'unknown',
                 title TEXT NOT NULL,
                 starts_at TEXT,
                 venue TEXT,
@@ -270,6 +275,42 @@ def init_db() -> None:
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS last_seen_external_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS ticket_closes_at TEXT")
+        conn.execute(
+            "ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'live_event'"
+        )
+        conn.execute(
+            "ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS event_format TEXT NOT NULL DEFAULT 'unknown'"
+        )
+        conn.execute(
+            """
+            UPDATE event_candidates
+            SET event_type = 'ticket'
+            WHERE event_type = 'live_event'
+              AND (
+                (starts_at IS NULL AND (ticket_opens_at IS NOT NULL OR ticket_closes_at IS NOT NULL))
+                OR title ~* '(ticket|チケット|티켓|先行|受付|抽選|一般販売)'
+              )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE event_candidates
+            SET event_format = CASE
+                WHEN venue IS NOT NULL AND venue <> '' AND
+                     venue !~* '(youtube|유튜브|온라인|配信|stream)' AND
+                     COALESCE(raw_text, '') ~* '(YouTube Live|歌枠|生配信|オンライン配信|ライブ配信|streaming live)'
+                    THEN 'hybrid'
+                WHEN venue IS NOT NULL AND venue <> '' AND
+                     venue !~* '(youtube|유튜브|온라인|配信|stream)' THEN 'onsite'
+                WHEN COALESCE(ticket_url, '') ~* '(youtube\\.com|youtu\\.be)' OR
+                     COALESCE(source_url, '') ~* '(youtube\\.com|youtu\\.be)' OR
+                     COALESCE(raw_text, '') ~* '(歌枠|YouTube Live|生配信|オンライン配信|streaming)'
+                    THEN 'online'
+                ELSE event_format
+            END
+            WHERE event_type = 'live_event'
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS google_oauth_tokens (
@@ -545,7 +586,63 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE namuwiki_templates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
+        _repair_online_live_dates(conn)
         conn.commit()
+
+
+def _repair_online_live_dates(conn: Connection) -> None:
+    """Repair yearless online-live dates that an extractor assigned to an old year."""
+    jst = timezone(timedelta(hours=9))
+    rows = conn.execute(
+        """
+        SELECT e.id, e.starts_at, s.published_at, s.raw_text
+        FROM event_candidates e
+        JOIN source_items s ON s.url = e.source_url
+        WHERE e.event_type = 'live_event' AND e.event_format = 'online'
+        """
+    ).fetchall()
+    for row in rows:
+        text = unicodedata.normalize("NFKC", row["raw_text"] or "")
+        published_at = row["published_at"]
+        if not published_at:
+            continue
+        local_published = published_at.astimezone(jst)
+        date_match = re.search(
+            r"(?<!\d)(1[0-2]|0?[1-9])\s*[./月]\s*(3[01]|[12]\d|0?[1-9])(?:日)?(?!\d)",
+            text,
+        )
+        is_today = bool(re.search(r"(?:本日|今日|today|오늘)", text, re.IGNORECASE))
+        if not date_match and not is_today:
+            continue
+        if date_match:
+            month, day = int(date_match.group(1)), int(date_match.group(2))
+            year = local_published.year
+            if (month, day) < (local_published.month, local_published.day):
+                year += 1
+        else:
+            year, month, day = (
+                local_published.year,
+                local_published.month,
+                local_published.day,
+            )
+        time_match = re.search(r"(?<!\d)([01]?\d|2[0-3])\s*[:：]\s*([0-5]\d)", text)
+        corrected = (
+            datetime(
+                year,
+                month,
+                day,
+                int(time_match.group(1)) if time_match else 0,
+                int(time_match.group(2)) if time_match else 0,
+                tzinfo=jst,
+            ).isoformat()
+            if time_match
+            else f"{year:04d}-{month:02d}-{day:02d}"
+        )
+        if corrected != row["starts_at"]:
+            conn.execute(
+                "UPDATE event_candidates SET starts_at = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (corrected, row["id"]),
+            )
 
 
 def row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:

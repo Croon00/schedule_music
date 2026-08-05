@@ -358,15 +358,17 @@ def create_event_candidate(payload: EventCandidateCreate) -> dict:
         cursor = conn.execute(
             """
             INSERT INTO event_candidates (
-                artist_id, source_id, title, starts_at, venue, ticket_opens_at,
+                artist_id, source_id, event_type, event_format, title, starts_at, venue, ticket_opens_at,
                 ticket_closes_at, ticket_url, price_text, source_url, raw_text, status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
                 data["artist_id"],
                 data["source_id"],
+                data["event_type"],
+                data["event_format"],
                 data["title"],
                 data["starts_at"],
                 data["venue"],
@@ -389,22 +391,33 @@ def create_event_candidate(payload: EventCandidateCreate) -> dict:
 
 
 @app.get("/event-candidates", response_model=list[EventCandidate])
-def list_event_candidates(status_filter: str | None = None) -> list[dict]:
+def list_event_candidates(
+    status_filter: str | None = None,
+    artist_id: int | None = None,
+    event_type: str | None = None,
+    event_format: str | None = None,
+) -> list[dict]:
     """저장된 일정 후보를 조회하고, status_filter가 있으면 해당 상태만 반환합니다."""
     with get_connection() as conn:
+        clauses: list[str] = []
+        params: list[object] = []
         if status_filter:
-            rows = conn.execute(
-                """
-                SELECT * FROM event_candidates
-                WHERE status = %s
-                ORDER BY created_at DESC
-                """,
-                (status_filter,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM event_candidates ORDER BY created_at DESC"
-            ).fetchall()
+            clauses.append("status = %s")
+            params.append(status_filter)
+        if artist_id is not None:
+            clauses.append("artist_id = %s")
+            params.append(artist_id)
+        if event_type:
+            clauses.append("event_type = %s")
+            params.append(event_type)
+        if event_format:
+            clauses.append("event_format = %s")
+            params.append(event_format)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM event_candidates{where} ORDER BY created_at DESC",
+            tuple(params),
+        ).fetchall()
         return [row_to_dict(row) for row in rows]
 
 
@@ -581,6 +594,19 @@ def _get_artist_with_sources(conn: Connection, artist_id: int) -> dict:
         (artist_id,),
     ).fetchall()
     artist["sources"] = [_source_row_to_dict(row) for row in sources]
+    representative = conn.execute(
+        """
+        SELECT y.youtube_url
+        FROM youtube_live_archives y
+        LEFT JOIN artist_sources s ON s.id = y.source_id
+        WHERE s.artist_id = %s
+           OR (s.id IS NULL AND LOWER(COALESCE(y.performer_name, '')) = LOWER(%s))
+        ORDER BY COALESCE(y.broadcast_at, y.published_at) DESC NULLS LAST, y.id DESC
+        LIMIT 1
+        """,
+        (artist_id, artist["name"]),
+    ).fetchone()
+    artist["representative_youtube_url"] = representative["youtube_url"] if representative else None
     return artist
 
 

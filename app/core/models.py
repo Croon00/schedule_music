@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 
 SourceType = Literal["x", "official_site", "ticket_site", "rss", "other"]
 CandidateStatus = Literal["needs_review", "ready", "synced", "ignored"]
+EventType = Literal["live_event", "ticket"]
+EventFormat = Literal["onsite", "hybrid", "online", "unknown"]
 
 
 class ArtistCreate(BaseModel):
@@ -44,6 +46,8 @@ class Artist(BaseModel):
     name: str
     display_name: str | None
     notes: str | None
+    spotify_image_url: str | None = None
+    representative_youtube_url: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -87,6 +91,8 @@ class EventCandidateCreate(BaseModel):
 
     artist_id: int | None = None
     source_id: int | None = None
+    event_type: EventType = "live_event"
+    event_format: EventFormat = "unknown"
     title: str = Field(min_length=1, max_length=200)
     starts_at: str | None = None
     venue: str | None = None

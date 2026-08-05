@@ -11,6 +11,7 @@ from app.core.config import settings
 
 
 ItemType = Literal["notice", "release", "live_event", "ticket", "merch", "irrelevant"]
+EventFormat = Literal["onsite", "hybrid", "online", "unknown"]
 
 
 class SourceItemClassification(BaseModel):
@@ -29,6 +30,7 @@ class MusicEventExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_live_event: bool
+    event_format: EventFormat = Field(...)
     title: str | None = Field(...)
     title_ko: str | None = Field(...)
     starts_at: str | None = Field(...)
@@ -246,6 +248,9 @@ async def extract_music_event(
                 "role": "system",
                 "content": (
                     "J-pop 라이브, 콘서트, 이벤트, 예매, 응모 일정 정보를 추출하세요. "
+                    "event_format은 실제 공연장이 있으면 onsite, 현장 공연과 온라인 중계를 함께 하면 hybrid, "
+                    "YouTube Live·歌枠·生配信처럼 온라인 전용이면 online, 근거가 부족하면 unknown으로 반환하세요. "
+                    "YouTube 링크가 있어도 실제 회장과 開場/開演 정보가 있으면 온라인 전용으로 판단하지 마세요. "
                     "알 수 없는 필드는 null로 반환하세요. 날짜와 시간은 가능하면 ISO 8601 형식을 사용하세요. "
                     "사용자에게 보이는 제목, 장소, 좌석, 가격, 신청 기간 정보는 한국어로 번역하세요. "
                     "연결된 페이지 문맥에 좌석 종류, 좌석 가격, 신청 시작/종료일, 예매 URL이 있으면 "
@@ -267,4 +272,48 @@ async def extract_music_event(
         return None
 
     extraction = MusicEventExtraction.model_validate(json.loads(content))
-    return extraction.to_event_candidate()
+    event = extraction.to_event_candidate()
+    if event is not None:
+        event["event_format"] = infer_event_format(
+            raw_text=raw_text,
+            page_context=page_context,
+            venue=event.get("venue"),
+            ticket_url=event.get("ticket_url"),
+            model_format=event.get("event_format", "unknown"),
+        )
+    return event
+
+
+def infer_event_format(
+    *,
+    raw_text: str,
+    page_context: str | None = None,
+    venue: str | None = None,
+    ticket_url: str | None = None,
+    model_format: EventFormat = "unknown",
+) -> EventFormat:
+    """Combine deterministic physical/streaming signals with the model result."""
+    text = "\n".join(filter(None, (raw_text, page_context, venue, ticket_url))).lower()
+    broadcast_signals = (
+        "youtube.com/live", "歌枠", "生配信", "オンライン配信",
+        "youtube live", "streaming live", "ライブ配信", "配信限定",
+    )
+    onsite_signals = (
+        "開場", "開演", "会場", "現地", "来場", "ライブハウス", "zepp",
+        "hall", "ホール", "arena", "アリーナ", "劇場", "会館",
+    )
+    has_broadcast = any(signal in text for signal in broadcast_signals)
+    has_youtube_link = "youtube.com/" in text or "youtu.be/" in text
+    normalized_venue = (venue or "").strip().lower()
+    online_venue_signals = ("youtube", "유튜브", "온라인", "配信", "stream")
+    has_physical_venue = bool(normalized_venue) and not any(
+        signal in normalized_venue for signal in online_venue_signals
+    )
+    has_onsite = has_physical_venue or any(signal in text for signal in onsite_signals)
+    if has_broadcast and has_onsite:
+        return "hybrid"
+    if has_onsite:
+        return "onsite"
+    if has_broadcast or has_youtube_link:
+        return "online"
+    return model_format
