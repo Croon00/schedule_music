@@ -1,0 +1,71 @@
+
+> schedule-music-web@0.1.0 dev
+> vite --host 127.0.0.1
+
+
+  [32m[1mVITE[22m v7.3.6[39m  [2mready in [0m[1m815[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m오후 12:23:12[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:23:21[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 12:23:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 12:23:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 12:23:53[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:24:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:24:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:41:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css, /src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/EventsPage.vue, /src/pages/YouTubeLivesPage.vue[22m
+[2m오후 12:42:18[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:42:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:42:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:43:42[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:45:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css, /src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/EventsPage.vue, /src/pages/YouTubeLivesPage.vue[22m
+[2m오후 12:45:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:46:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:46:21[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:50:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:50:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css, /src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/EventsPage.vue, /src/pages/YouTubeLivesPage.vue[22m
+[2m오후 12:50:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:50:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 12:50:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 12:51:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:10:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 1:10:52[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:10:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:11:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:11:11[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 1:12:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2msrc/router/index.ts[22m
+[2m오후 1:12:06[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 1:12:13[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 1:15:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 1:15:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css, /src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/EventsPage.vue, /src/pages/YouTubeLivesPage.vue, /src/pages/WikiStudioPage.vue[22m
+[2m오후 1:15:39[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:15:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MusicLibraryPage.vue, /src/styles.css[22m
+[2m오후 1:15:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 1:19:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2msrc/router/index.ts[22m
+[2m오후 1:19:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
+[2m오후 1:19:43[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
+[2m오후 1:20:09[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
+[2m오후 1:20:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue?vue&type=style&index=0&scoped=4fb710d8&lang.css, /src/styles.css[22m
+[2m오후 4:22:43[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:22:43[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css, /src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/EventsPage.vue, /src/pages/YouTubeLivesPage.vue, /src/pages/WikiStudioPage.vue, /src/pages/ArtistDiscographyPage.vue, /src/pages/SettingsPage.vue[22m
+[2m오후 4:22:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mpage reload [39m[2msrc/router/index.ts[22m
+[2m오후 4:22:44[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue, /src/styles.css[22m
+[2m오후 4:27:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:28:24[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 4:28:24[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/LyricsRegistrationPage.vue, /src/styles.css[22m
+[2m오후 4:28:24[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
+[2m오후 4:28:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:35:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:35:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/LyricsRegistrationPage.vue, /src/pages/LyricsRegistrationPage.vue?vue&type=style&index=0&scoped=a9f8afcd&lang.css, /src/styles.css[22m
+[2m오후 4:35:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 4:35:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/pages/YouTubeLivesPage.vue?vue&type=style&index=0&scoped=4fb710d8&lang.css, /src/styles.css[22m
+[2m오후 4:35:34[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:35:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:35:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:35:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 4:35:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
+[2m오후 4:35:35[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/LyricsRegistrationPage.vue, /src/styles.css[22m
+[2m오후 4:40:16[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m
+[2m오후 4:40:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:40:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
+[2m오후 4:41:14[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ArtistsPage.vue, /src/styles.css[22m

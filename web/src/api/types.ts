@@ -1,4 +1,22 @@
 export type SourceType = 'x' | 'official_site' | 'ticket_site' | 'rss' | 'other'
+export type ArtistKind = 'vtuber' | 'singer'
+
+export interface ArtistAgency {
+  id: number
+  name: string
+  created_at: string
+}
+
+export type LyricsSourceMode = 'caption' | 'description' | 'comment' | 'audio'
+
+export interface WebSongCreated {
+  id: number
+  artist_name: string
+  title: string
+  lyrics_source_type: string
+  needs_review: boolean
+  spotify_track_id: string | null
+}
 export type CandidateStatus = 'needs_review' | 'ready' | 'synced' | 'ignored'
 export type EventType = 'live_event' | 'ticket'
 export type EventFormat = 'onsite' | 'hybrid' | 'online' | 'unknown'
@@ -18,6 +36,11 @@ export interface Artist {
   id: number
   name: string
   display_name: string | null
+  artist_kind: ArtistKind
+  agency: string | null
+  show_in_spotify: boolean
+  show_in_lyrics: boolean
+  show_in_youtube_lives: boolean
   notes: string | null
   spotify_image_url: string | null
   representative_youtube_url: string | null
@@ -29,6 +52,11 @@ export interface Artist {
 export interface ArtistCreate {
   name: string
   display_name?: string
+  artist_kind?: ArtistKind
+  agency?: string
+  show_in_spotify?: boolean
+  show_in_lyrics?: boolean
+  show_in_youtube_lives?: boolean
   notes?: string
   x_username?: string
 }
@@ -91,11 +119,22 @@ export interface SongArticleInput {
 export interface SpotifyArtist {
   local_artist_id: number
   local_name: string
+  artist_kind: ArtistKind
+  agency: string | null
   spotify_artist_id: string | null
   spotify_name: string | null
   image_url: string | null
   spotify_url: string | null
   matched: boolean
+}
+
+export interface SpotifyArtistCandidate {
+  local_artist_id: number
+  spotify_artist_id: string
+  name: string
+  image_url: string | null
+  spotify_url: string | null
+  genres: string[]
 }
 
 export interface SpotifyAlbum {

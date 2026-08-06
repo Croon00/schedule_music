@@ -87,6 +87,8 @@ class SpotifyRelationship(BaseModel):
 class SpotifyRegisteredArtist(BaseModel):
     local_artist_id: int
     local_name: str
+    artist_kind: str
+    agency: str | None = None
     spotify_artist_id: str | None = None
     spotify_name: str | None = None
     image_url: str | None = None
@@ -158,6 +160,23 @@ async def search_spotify_artist(local_artist_id: int, name: str) -> SpotifyArtis
         ),
     )
     return spotify_artist_from_api_item(local_artist_id, best)
+
+
+async def search_spotify_artist_candidates(
+    local_artist_id: int,
+    name: str,
+    *,
+    limit: int = 5,
+) -> list[SpotifyArtistProfile]:
+    """사용자가 직접 고를 수 있도록 Spotify 아티스트 검색 후보를 반환합니다."""
+    token = await _get_spotify_access_token()
+    data = await _spotify_get(
+        "/search",
+        token,
+        params={"q": f'artist:"{name}"', "type": "artist", "limit": limit},
+    )
+    items = ((data.get("artists") or {}).get("items") or [])
+    return [spotify_artist_from_api_item(local_artist_id, item) for item in items]
 
 
 async def get_spotify_artist(

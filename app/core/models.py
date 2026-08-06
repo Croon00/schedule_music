@@ -5,9 +5,38 @@ from pydantic import BaseModel, Field, field_validator
 
 
 SourceType = Literal["x", "official_site", "ticket_site", "rss", "other"]
+ArtistKind = Literal["vtuber", "singer"]
+
+
+class ArtistAgencyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ArtistAgency(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
 CandidateStatus = Literal["needs_review", "ready", "synced", "ignored"]
 EventType = Literal["live_event", "ticket"]
 EventFormat = Literal["onsite", "hybrid", "online", "unknown"]
+WebLyricsSourceMode = Literal["caption", "description", "comment", "audio"]
+
+
+class WebSongCreate(BaseModel):
+    artist_id: int
+    title: str = Field(min_length=1, max_length=200)
+    youtube_url: str = Field(min_length=1, max_length=500)
+    source_mode: WebLyricsSourceMode = "caption"
+    language_code: str = Field(default="ja", min_length=2, max_length=10)
+
+
+class WebSongCreated(BaseModel):
+    id: int
+    artist_name: str
+    title: str
+    lyrics_source_type: str
+    needs_review: bool
+    spotify_track_id: str | None = None
 
 
 class ArtistCreate(BaseModel):
@@ -15,6 +44,11 @@ class ArtistCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     display_name: str | None = Field(default=None, max_length=120)
+    artist_kind: ArtistKind = "vtuber"
+    agency: str | None = Field(default=None, max_length=120)
+    show_in_spotify: bool = True
+    show_in_lyrics: bool = True
+    show_in_youtube_lives: bool = True
     notes: str | None = None
     x_username: str | None = Field(
         default=None,
@@ -36,6 +70,11 @@ class ArtistUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
     display_name: str | None = Field(default=None, max_length=120)
+    artist_kind: ArtistKind | None = None
+    agency: str | None = Field(default=None, max_length=120)
+    show_in_spotify: bool | None = None
+    show_in_lyrics: bool | None = None
+    show_in_youtube_lives: bool | None = None
     notes: str | None = None
 
 
@@ -45,6 +84,11 @@ class Artist(BaseModel):
     id: int
     name: str
     display_name: str | None
+    artist_kind: ArtistKind
+    agency: str | None = None
+    show_in_spotify: bool = True
+    show_in_lyrics: bool = True
+    show_in_youtube_lives: bool = True
     notes: str | None
     spotify_image_url: str | None = None
     representative_youtube_url: str | None = None

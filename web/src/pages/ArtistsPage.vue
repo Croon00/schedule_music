@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/api/client'
-import type { Artist, SourceType } from '@/api/types'
+import type { Artist, ArtistKind, SourceType } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -12,7 +12,14 @@ const artistsQuery = useQuery({ queryKey: ['artists'], queryFn: api.artists.list
 const artistModal = ref(false)
 const sourceArtist = ref<Artist | null>(null)
 const feedback = ref('')
-const artistForm = reactive({ name: '', display_name: '', x_username: '', notes: '' })
+const artistForm = reactive({
+  name: '',
+  display_name: '',
+  artist_kind: 'vtuber' as ArtistKind,
+  agency: '',
+  x_username: '',
+  notes: '',
+})
 const sourceForm = reactive({
   source_type: 'x' as SourceType,
   label: '',
@@ -26,7 +33,14 @@ const createArtist = useMutation({
   onSuccess: async () => {
     await refresh()
     artistModal.value = false
-    Object.assign(artistForm, { name: '', display_name: '', x_username: '', notes: '' })
+    Object.assign(artistForm, {
+      name: '',
+      display_name: '',
+      artist_kind: 'vtuber',
+      agency: '',
+      x_username: '',
+      notes: '',
+    })
     feedback.value = '아티스트를 등록했습니다.'
   },
 })
@@ -48,11 +62,29 @@ const removeSource = useMutation({
     api.artists.removeSource(artistId, sourceId),
   onSuccess: refresh,
 })
+const updateVisibility = useMutation({
+  mutationFn: ({ artistId, field, value }: { artistId: number; field: 'show_in_spotify' | 'show_in_lyrics' | 'show_in_youtube_lives'; value: boolean }) =>
+    api.artists.update(artistId, { [field]: value }),
+  onMutate: async ({ artistId, field, value }) => {
+    await queryClient.cancelQueries({ queryKey: ['artists'] })
+    const previous = queryClient.getQueryData<Artist[]>(['artists'])
+    queryClient.setQueryData<Artist[]>(['artists'], (rows = []) =>
+      rows.map((artist) => artist.id === artistId ? { ...artist, [field]: value } : artist),
+    )
+    return { previous }
+  },
+  onError: (_error, _variables, context) => {
+    if (context?.previous) queryClient.setQueryData(['artists'], context.previous)
+  },
+  onSettled: refresh,
+})
 
 function submitArtist(): void {
   createArtist.mutate({
     name: artistForm.name,
     display_name: artistForm.display_name || undefined,
+    artist_kind: artistForm.artist_kind,
+    agency: artistForm.agency || undefined,
     x_username: artistForm.x_username || undefined,
     notes: artistForm.notes || undefined,
   })
@@ -83,6 +115,7 @@ function sourceLabel(type: SourceType): string {
     <div v-if="artistsQuery.isError.value" class="alert alert--error">
       목록을 불러오지 못했습니다. FastAPI 연결을 확인해 주세요.
     </div>
+    <div v-if="updateVisibility.isError.value" class="alert alert--error">노출 설정을 변경하지 못했습니다. API 연결을 확인해 주세요.</div>
 
     <section class="panel panel--table">
       <div class="panel__heading">
@@ -98,6 +131,7 @@ function sourceLabel(type: SourceType): string {
           <div class="artist-avatar">{{ (artist.display_name || artist.name).slice(0, 1) }}</div>
           <div class="artist-row__identity">
             <strong>{{ artist.display_name || artist.name }}</strong>
+            <span>{{ artist.artist_kind === 'vtuber' ? 'VTUBER' : 'SINGER' }}</span>
             <span>{{ artist.name }} · ID {{ artist.id }}</span>
             <p v-if="artist.notes">{{ artist.notes }}</p>
           </div>
@@ -113,14 +147,18 @@ function sourceLabel(type: SourceType): string {
               </button>
             </span>
             <span v-if="!artist.sources.length" class="muted">연결된 소스 없음</span>
+            <button class="button button--ghost source-add-button" @click="sourceArtist = artist">+ X 계정 추가</button>
           </div>
-          <StatusPill
-            :label="artist.sources.some((source) => source.is_active) ? '수집 중' : '대기'"
-            :tone="artist.sources.some((source) => source.is_active) ? 'green' : 'muted'"
-          />
-          <div class="row-actions">
-            <button class="button button--ghost" @click="sourceArtist = artist">소스 추가</button>
-            <button class="icon-button icon-button--danger" @click="confirmArtistDelete(artist)">×</button>
+          <div class="artist-row__controls">
+            <div class="visibility-controls" aria-label="화면 노출 설정">
+              <button :class="{ active: artist.show_in_spotify }" :aria-pressed="artist.show_in_spotify" @click="updateVisibility.mutate({ artistId: artist.id, field: 'show_in_spotify', value: !artist.show_in_spotify })"><span>Spotify</span><b>{{ artist.show_in_spotify ? '표시' : '숨김' }}</b></button>
+              <button :class="{ active: artist.show_in_lyrics }" :aria-pressed="artist.show_in_lyrics" @click="updateVisibility.mutate({ artistId: artist.id, field: 'show_in_lyrics', value: !artist.show_in_lyrics })"><span>가사</span><b>{{ artist.show_in_lyrics ? '표시' : '숨김' }}</b></button>
+              <button :class="{ active: artist.show_in_youtube_lives }" :aria-pressed="artist.show_in_youtube_lives" @click="updateVisibility.mutate({ artistId: artist.id, field: 'show_in_youtube_lives', value: !artist.show_in_youtube_lives })"><span>우타와꾸</span><b>{{ artist.show_in_youtube_lives ? '표시' : '숨김' }}</b></button>
+            </div>
+            <div class="source-actions">
+              <StatusPill :label="artist.sources.some((source) => source.is_active) ? 'X 수집 중' : '수집 대기'" :tone="artist.sources.some((source) => source.is_active) ? 'green' : 'muted'" />
+              <button class="icon-button icon-button--danger" aria-label="아티스트 삭제" @click="confirmArtistDelete(artist)">×</button>
+            </div>
           </div>
         </article>
       </div>
@@ -139,6 +177,8 @@ function sourceLabel(type: SourceType): string {
       <form class="form-grid" @submit.prevent="submitArtist">
         <label>기준 이름<input v-model="artistForm.name" required maxlength="120" placeholder="예: HACHI" /></label>
         <label>표시 이름<input v-model="artistForm.display_name" maxlength="120" placeholder="예: HACHI / ハチ" /></label>
+        <label>아티스트 유형<select v-model="artistForm.artist_kind"><option value="vtuber">VTuber</option><option value="singer">가수</option></select></label>
+        <label v-if="artistForm.artist_kind === 'vtuber'">소속<input v-model="artistForm.agency" maxlength="120" placeholder="예: RK Music" /></label>
         <label class="form-grid__wide">X 사용자명<input v-model="artistForm.x_username" placeholder="@HACHI_08" /></label>
         <label class="form-grid__wide">메모<textarea v-model="artistForm.notes" rows="3" placeholder="레이블, 활동 그룹 등 운영 메모" /></label>
         <p v-if="createArtist.error.value" class="form-error">{{ createArtist.error.value.message }}</p>

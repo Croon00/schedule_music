@@ -1,20 +1,29 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/api/client'
-import type { SpotifyAlbum, SpotifyArtist } from '@/api/types'
+import type { SpotifyAlbum, SpotifyArtist, SpotifyArtistCandidate } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusPill from '@/components/StatusPill.vue'
 
 const queryClient = useQueryClient()
+const router = useRouter()
 const selectedArtistId = ref<number | null>(null)
 const viewMode = ref<'grid' | 'list'>('grid')
 const releaseFilter = ref<'all' | 'album' | 'single' | 'appears_on'>('all')
 const selectedAlbumId = ref<string | null>(null)
 const relationMode = ref(false)
+const artistKind = ref<'vtuber' | 'singer' | null>(null)
+const agencyFilter = ref<string>('all')
+const candidateArtist = ref<SpotifyArtist | null>(null)
+const candidateResults = ref<SpotifyArtistCandidate[]>([])
+const agencyModal = ref(false)
+const newAgencyName = ref('')
 
 const artistsQuery = useQuery({ queryKey: ['spotify-artists'], queryFn: api.spotify.artists })
+const agenciesQuery = useQuery({ queryKey: ['artist-agencies'], queryFn: api.artistAgencies.list })
 const discographyQuery = useQuery({
   queryKey: ['spotify-discography', selectedArtistId],
   queryFn: () => api.spotify.discography(selectedArtistId.value as number),
@@ -31,14 +40,50 @@ const relationshipsQuery = useQuery({
   enabled: relationMode,
   staleTime: 10 * 60_000,
 })
-const syncArtists = useMutation({
-  mutationFn: api.spotify.syncArtists,
-  onSuccess: (artists) => {
-    queryClient.setQueryData(['spotify-artists'], artists)
+const syncArtist = useMutation({
+  mutationFn: ({ artistId, spotifyArtistId }: { artistId: number; spotifyArtistId: string }) =>
+    api.spotify.syncArtist(artistId, spotifyArtistId),
+  onSuccess: async (artist) => {
+    candidateArtist.value = null
+    candidateResults.value = []
+    await queryClient.invalidateQueries({ queryKey: ['spotify-artists'] })
+    selectArtist(artist)
+  },
+})
+const searchCandidates = useMutation({
+  mutationFn: api.spotify.artistCandidates,
+  onSuccess: (candidates) => {
+    candidateResults.value = candidates
+  },
+})
+const createAgency = useMutation({
+  mutationFn: api.artistAgencies.create,
+  onSuccess: async (agency) => {
+    await queryClient.invalidateQueries({ queryKey: ['artist-agencies'] })
+    agencyFilter.value = agency.name
+    newAgencyName.value = ''
+    agencyModal.value = false
+  },
+})
+const excludeArtist = useMutation({
+  mutationFn: api.spotify.excludeArtist,
+  onSuccess: async () => {
+    selectedArtistId.value = null
+    selectedAlbumId.value = null
+    await queryClient.invalidateQueries({ queryKey: ['spotify-artists'] })
+    await queryClient.invalidateQueries({ queryKey: ['spotify-relationships'] })
   },
 })
 
-const artists = computed(() => artistsQuery.data.value ?? [])
+const allArtists = computed(() => artistsQuery.data.value ?? [])
+const artists = computed(() =>
+  artistKind.value
+    ? allArtists.value.filter((artist) =>
+        artist.artist_kind === artistKind.value
+        && (artistKind.value !== 'vtuber' || agencyFilter.value === 'all' || artist.agency === agencyFilter.value),
+      )
+    : [],
+)
 const selectedArtist = computed(() =>
   artists.value.find((artist) => artist.local_artist_id === selectedArtistId.value),
 )
@@ -61,20 +106,47 @@ const artistById = computed(() =>
   new Map(artists.value.map((artist) => [artist.local_artist_id, artist])),
 )
 
-watch(
-  artists,
-  (value) => {
-    if (selectedArtistId.value === null) {
-      selectedArtistId.value = value.find((artist) => artist.matched)?.local_artist_id ?? null
-    }
-  },
-  { immediate: true },
-)
-
 function selectArtist(artist: SpotifyArtist): void {
-  if (!artist.matched) return
+  if (!artist.matched) {
+    syncSelectedArtist(artist)
+    return
+  }
   relationMode.value = false
-  selectedArtistId.value = artist.local_artist_id
+  router.push(`/music/artists/${artist.local_artist_id}`)
+}
+
+function syncSelectedArtist(artist: SpotifyArtist): void {
+  candidateArtist.value = artist
+  candidateResults.value = []
+  searchCandidates.mutate(artist.local_artist_id)
+}
+
+function confirmCandidate(candidate: SpotifyArtistCandidate): void {
+  if (!candidateArtist.value) return
+  syncArtist.mutate({
+    artistId: candidateArtist.value.local_artist_id,
+    spotifyArtistId: candidate.spotify_artist_id,
+  })
+}
+
+function submitAgency(): void {
+  const name = newAgencyName.value.trim()
+  if (name) createAgency.mutate(name)
+}
+
+function selectArtistKind(kind: 'vtuber' | 'singer'): void {
+  artistKind.value = kind
+  agencyFilter.value = 'all'
+  selectedArtistId.value = null
+  selectedAlbumId.value = null
+  relationMode.value = false
+}
+
+function confirmSpotifyExclusion(artist: SpotifyArtist): void {
+  const name = artist.spotify_name || artist.local_name
+  if (window.confirm(`${name}을 Spotify 목록과 이후 동기화 대상에서 제외할까요? X 계정은 유지됩니다.`)) {
+    excludeArtist.mutate(artist.local_artist_id)
+  }
 }
 
 function albumKind(album: SpotifyAlbum): string {
@@ -96,38 +168,54 @@ function duration(milliseconds: number | null): string {
     <PageHeader
       eyebrow="SPOTIFY CATALOG / 04"
       title="아티스트 디스코그래피"
-      description="등록한 아티스트의 앨범, 싱글과 참여작을 Spotify 공식 카탈로그에서 탐색합니다."
-    >
-      <button
-        class="button button--spotify"
-        :disabled="syncArtists.isPending.value"
-        @click="syncArtists.mutate()"
-      >
-        {{ syncArtists.isPending.value ? 'Spotify 매칭 중…' : '↻ 아티스트 동기화' }}
-      </button>
-    </PageHeader>
+      description="목록에서 원하는 아티스트만 선택해 Spotify 카탈로그를 등록하고 탐색합니다."
+    />
 
-    <div v-if="artistsQuery.isError.value || syncArtists.isError.value" class="alert alert--error">
-      {{ syncArtists.error.value?.message || 'Spotify 아티스트 정보를 불러오지 못했습니다.' }}
+    <div v-if="artistsQuery.isError.value || syncArtist.isError.value || searchCandidates.isError.value" class="alert alert--error">
+      {{ syncArtist.error.value?.message || searchCandidates.error.value?.message || 'Spotify 아티스트 정보를 불러오지 못했습니다.' }}
     </div>
 
-    <section class="artist-rail-section">
+    <section class="artist-kind-picker" aria-label="아티스트 유형 선택">
+      <button :class="{ active: artistKind === 'vtuber' }" @click="selectArtistKind('vtuber')">
+        <span>VIRTUAL ARTIST</span>
+        <strong>VTuber</strong>
+        <em>{{ allArtists.filter((artist) => artist.artist_kind === 'vtuber').length }}명</em>
+      </button>
+      <button :class="{ active: artistKind === 'singer' }" @click="selectArtistKind('singer')">
+        <span>MUSIC ARTIST</span>
+        <strong>가수</strong>
+        <em>{{ allArtists.filter((artist) => artist.artist_kind === 'singer').length }}명</em>
+      </button>
+    </section>
+
+    <div v-if="artistKind === 'vtuber'" class="agency-filter" aria-label="VTuber 소속 선택">
+      <button :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</button>
+      <button
+        v-for="agency in agenciesQuery.data.value || []"
+        :key="agency.id"
+        :class="{ active: agencyFilter === agency.name }"
+        @click="agencyFilter = agency.name"
+      >
+        {{ agency.name === 'KAMITSUBAKI STUDIO' ? 'KAMITSUBAKI' : agency.name }}
+      </button>
+      <button class="agency-filter__add" @click="agencyModal = true">+ 소속 추가</button>
+    </div>
+
+    <section v-if="artistKind" class="artist-rail-section">
       <div class="section-heading">
         <div><p class="eyebrow">SELECT ARTIST</p><h2>아티스트 선택</h2></div>
-        <button class="relation-switch" :class="{ active: relationMode }" @click="relationMode = !relationMode">
-          <span>⌘</span> 등록 아티스트 연관도
-        </button>
+        <span class="count-label">{{ artists.length }} ARTISTS</span>
       </div>
-      <div v-if="artistsQuery.isPending.value" class="artist-card-rail">
+      <div v-if="artistsQuery.isPending.value" class="artist-card-grid">
         <div v-for="index in 5" :key="index" class="artist-card artist-card--loading" />
       </div>
-      <div v-else class="artist-card-rail">
+      <div v-else class="artist-card-grid">
         <button
           v-for="artist in artists"
           :key="artist.local_artist_id"
           class="artist-card"
           :class="{ selected: artist.local_artist_id === selectedArtistId && !relationMode, unmatched: !artist.matched }"
-          :disabled="!artist.matched"
+          :disabled="syncArtist.isPending.value"
           @click="selectArtist(artist)"
         >
           <img v-if="artist.image_url" :src="artist.image_url" :alt="artist.spotify_name || artist.local_name" />
@@ -136,10 +224,14 @@ function duration(milliseconds: number | null): string {
           <div class="artist-card__content">
             <span>{{ artist.matched ? 'SPOTIFY ARTIST' : 'MATCH NEEDED' }}</span>
             <strong>{{ artist.spotify_name || artist.local_name }}</strong>
-            <em>{{ artist.matched ? '카탈로그 보기 →' : '동기화 필요' }}</em>
+            <em>{{ artist.matched ? '카탈로그 보기 →' : (searchCandidates.isPending.value && searchCandidates.variables.value === artist.local_artist_id ? '후보 검색 중…' : '클릭하여 후보 선택') }}</em>
           </div>
         </button>
       </div>
+    </section>
+    <section v-else class="empty-state artist-kind-empty">
+      <strong>먼저 아티스트 유형을 선택해 주세요</strong>
+      <p>VTuber와 일반 가수의 카탈로그를 나누어 탐색할 수 있습니다.</p>
     </section>
 
     <section v-if="relationMode" class="relationship-panel">
@@ -180,7 +272,7 @@ function duration(milliseconds: number | null): string {
       </div>
     </section>
 
-    <template v-else>
+    <template v-else-if="selectedArtist">
       <section v-if="selectedArtist" class="artist-catalog-header">
         <div>
           <p class="eyebrow">DISCOGRAPHY</p>
@@ -191,9 +283,18 @@ function duration(milliseconds: number | null): string {
             <span><b>{{ discographyQuery.data.value?.length || 0 }}</b> Releases</span>
           </div>
         </div>
-        <a v-if="selectedArtist.spotify_url" :href="selectedArtist.spotify_url" target="_blank" rel="noreferrer" class="spotify-attribution">
-          Spotify에서 보기 ↗
-        </a>
+        <div class="catalog-actions">
+          <a v-if="selectedArtist.spotify_url" :href="selectedArtist.spotify_url" target="_blank" rel="noreferrer" class="spotify-attribution">
+            Spotify에서 보기 ↗
+          </a>
+          <button
+            class="button button--danger"
+            :disabled="excludeArtist.isPending.value"
+            @click="confirmSpotifyExclusion(selectedArtist)"
+          >
+            {{ excludeArtist.isPending.value ? '제외 중…' : 'Spotify 동기화 제외' }}
+          </button>
+        </div>
       </section>
 
       <section class="catalog-toolbar">
@@ -239,6 +340,46 @@ function duration(milliseconds: number | null): string {
         <span>♫</span><strong>표시할 발매작이 없습니다</strong><p>다른 필터를 선택하거나 Spotify 동기화를 다시 실행해 주세요.</p>
       </div>
     </template>
+
+    <AppModal
+      :open="agencyModal"
+      title="VTuber 소속 추가"
+      description="기업, 레이블 또는 프로젝트 이름을 등록하면 소속 필터에 바로 추가됩니다."
+      @close="agencyModal = false"
+    >
+      <form class="form-grid" @submit.prevent="submitAgency">
+        <label class="form-grid__wide">소속 이름<input v-model="newAgencyName" required maxlength="120" placeholder="예: hololive production" /></label>
+        <p v-if="createAgency.error.value" class="form-error">{{ createAgency.error.value.message }}</p>
+        <div class="form-actions">
+          <button type="button" class="button button--ghost" @click="agencyModal = false">취소</button>
+          <button class="button button--primary" :disabled="createAgency.isPending.value">{{ createAgency.isPending.value ? '추가 중…' : '소속 추가' }}</button>
+        </div>
+      </form>
+    </AppModal>
+
+    <AppModal
+      :open="Boolean(candidateArtist)"
+      :title="`${candidateArtist?.local_name || ''} Spotify 후보 선택`"
+      description="프로필 이미지, 이름과 장르를 확인한 뒤 정확한 공식 아티스트를 선택해 주세요."
+      @close="candidateArtist = null"
+    >
+      <div v-if="searchCandidates.isPending.value" class="skeleton-list"><i /><i /><i /></div>
+      <div v-else-if="candidateResults.length" class="spotify-candidate-list">
+        <article v-for="candidate in candidateResults" :key="candidate.spotify_artist_id" class="spotify-candidate">
+          <img v-if="candidate.image_url" :src="candidate.image_url" :alt="candidate.name" />
+          <div v-else class="spotify-candidate__fallback">{{ candidate.name.slice(0, 1) }}</div>
+          <div>
+            <strong>{{ candidate.name }}</strong>
+            <p>{{ candidate.genres.length ? candidate.genres.join(' · ') : '장르 정보 없음' }}</p>
+            <a v-if="candidate.spotify_url" :href="candidate.spotify_url" target="_blank" rel="noreferrer">Spotify에서 확인 ↗</a>
+          </div>
+          <button class="button button--spotify" :disabled="syncArtist.isPending.value" @click="confirmCandidate(candidate)">
+            {{ syncArtist.isPending.value ? '등록 중…' : '이 아티스트로 등록' }}
+          </button>
+        </article>
+      </div>
+      <div v-else class="empty-state"><strong>Spotify 검색 후보가 없습니다</strong><p>등록된 아티스트 이름을 확인해 주세요.</p></div>
+    </AppModal>
 
     <AppModal
       :open="Boolean(selectedAlbumId)"

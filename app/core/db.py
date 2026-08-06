@@ -213,6 +213,11 @@ def init_db() -> None:
                 discord_user_id TEXT,
                 name TEXT NOT NULL,
                 display_name TEXT,
+                artist_kind TEXT NOT NULL DEFAULT 'vtuber',
+                agency TEXT,
+                show_in_spotify BOOLEAN NOT NULL DEFAULT TRUE,
+                show_in_lyrics BOOLEAN NOT NULL DEFAULT TRUE,
+                show_in_youtube_lives BOOLEAN NOT NULL DEFAULT TRUE,
                 notes TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -235,6 +240,22 @@ def init_db() -> None:
                 FOREIGN KEY (artist_id) REFERENCES artists(id) ON DELETE CASCADE,
                 UNIQUE (artist_id, source_type, value)
             )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS artist_agencies (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO artist_agencies (name)
+            VALUES ('RK Music'), ('KAMITSUBAKI STUDIO')
+            ON CONFLICT (name) DO NOTHING
             """
         )
         conn.execute(
@@ -264,7 +285,38 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
+        conn.execute(
+            "ALTER TABLE artists ADD COLUMN IF NOT EXISTS artist_kind TEXT NOT NULL DEFAULT 'vtuber'"
+        )
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS agency TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_spotify BOOLEAN NOT NULL DEFAULT TRUE")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_lyrics BOOLEAN NOT NULL DEFAULT TRUE")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_youtube_lives BOOLEAN NOT NULL DEFAULT TRUE")
+        conn.execute(
+            "UPDATE artists SET artist_kind = 'singer' WHERE discord_user_id = %s",
+            (ADDITIONAL_ARTISTS_SYSTEM_USER_ID,),
+        )
+        conn.execute(
+            "UPDATE artists SET agency = 'RK Music' WHERE discord_user_id = %s",
+            (RK_MUSIC_SYSTEM_USER_ID,),
+        )
+        conn.execute(
+            "UPDATE artists SET agency = 'KAMITSUBAKI STUDIO' WHERE discord_user_id = %s",
+            (VWP_SYSTEM_USER_ID,),
+        )
+        conn.execute(
+            """
+            DO $$ BEGIN
+                ALTER TABLE artists ADD CONSTRAINT artists_artist_kind_check
+                CHECK (artist_kind IN ('vtuber', 'singer'));
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$
+            """
+        )
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_artist_id TEXT")
+        conn.execute(
+            "ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_sync_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+        )
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_name TEXT")
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_image_url TEXT")
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_url TEXT")

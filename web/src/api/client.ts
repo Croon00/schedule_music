@@ -1,5 +1,6 @@
 import type {
   Artist,
+  ArtistAgency,
   ArtistCreate,
   CandidateStatus,
   EventCandidate,
@@ -11,11 +12,14 @@ import type {
   SpotifyAlbum,
   SpotifyAlbumDetail,
   SpotifyArtist,
+  SpotifyArtistCandidate,
   SpotifyRelationship,
   EventType,
   EventFormat,
   YouTubeLiveArchive,
   YouTubePerformanceSearchResult,
+  LyricsSourceMode,
+  WebSongCreated,
 } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api-proxy').replace(/\/$/, '')
@@ -49,6 +53,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string }>('/health'),
+  artistAgencies: {
+    list: () => request<ArtistAgency[]>('/artist-agencies'),
+    create: (name: string) =>
+      request<ArtistAgency>('/artist-agencies', { method: 'POST', body: JSON.stringify({ name }) }),
+  },
+  songs: {
+    createFromYouTube: (payload: { artist_id: number; title: string; youtube_url: string; source_mode: LyricsSourceMode; language_code: string }) =>
+      request<WebSongCreated>('/songs/from-youtube', { method: 'POST', body: JSON.stringify(payload) }),
+  },
   artists: {
     list: () => request<Artist[]>('/artists'),
     create: (payload: ArtistCreate) =>
@@ -128,7 +141,12 @@ export const api = {
   },
   spotify: {
     artists: () => request<SpotifyArtist[]>('/spotify/artists'),
-    syncArtists: () => request<SpotifyArtist[]>('/spotify/artists/sync', { method: 'POST' }),
+    artistCandidates: (artistId: number) =>
+      request<SpotifyArtistCandidate[]>(`/spotify/artists/${artistId}/candidates`),
+    syncArtist: (artistId: number, spotifyArtistId: string) =>
+      request<SpotifyArtist>(`/spotify/artists/${artistId}/sync?spotify_artist_id=${encodeURIComponent(spotifyArtistId)}`, { method: 'POST' }),
+    excludeArtist: (artistId: number) =>
+      request<void>(`/spotify/artists/${artistId}`, { method: 'DELETE' }),
     discography: (artistId: number) =>
       request<SpotifyAlbum[]>(`/spotify/artists/${artistId}/discography`),
     album: (albumId: string) =>

@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.core.db import get_connection, init_db, row_to_dict
 from app.core.models import (
     Artist,
+    ArtistAgency,
+    ArtistAgencyCreate,
     ArtistCreate,
     ArtistUpdate,
     ArtistWithSources,
@@ -18,12 +20,16 @@ from app.core.models import (
     EventCandidateCreate,
     Source,
     SourceCreate,
+    WebSongCreate,
+    WebSongCreated,
 )
 from app.integrations.google_calendar import (
     build_google_auth_url,
     exchange_code_for_tokens,
     google_oauth_configured,
 )
+from app.lyrics_pipeline.song_service import save_song_from_youtube
+from app.lyrics_pipeline.service import LyricsPipelineError
 from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
@@ -34,11 +40,13 @@ from app.integrations.spotify import (
     SpotifyAlbumDetail,
     SpotifyAlbumSummary,
     SpotifyApiError,
+    SpotifyArtistProfile,
     SpotifyRegisteredArtist,
     SpotifyRelationship,
     get_album_detail,
     get_artist_discography,
-    search_spotify_artist,
+    get_spotify_artist,
+    search_spotify_artist_candidates,
     spotify_configured,
 )
 from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
@@ -205,17 +213,68 @@ async def google_auth_callback(code: str, state: str) -> str:
     """
 
 
+@app.get("/artist-agencies", response_model=list[ArtistAgency])
+def list_artist_agencies() -> list[dict]:
+    """VTuber 소속 필터에 사용할 기업·레이블 목록을 반환합니다."""
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM artist_agencies ORDER BY name").fetchall()
+        return [row_to_dict(row) for row in rows]
+
+
+@app.post("/artist-agencies", response_model=ArtistAgency, status_code=status.HTTP_201_CREATED)
+def create_artist_agency(payload: ArtistAgencyCreate) -> dict:
+    """새 VTuber 소속 기업·레이블을 등록합니다."""
+    name = payload.name.strip()
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                "INSERT INTO artist_agencies (name) VALUES (%s) RETURNING *",
+                (name,),
+            ).fetchone()
+            conn.commit()
+            return row_to_dict(row)
+    except errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="이미 등록된 소속입니다.") from exc
+
+
+@app.post("/songs/from-youtube", response_model=WebSongCreated, status_code=status.HTTP_201_CREATED)
+async def create_song_from_youtube(payload: WebSongCreate) -> dict:
+    """등록 아티스트의 YouTube 곡에서 가사·번역·발음을 생성해 저장합니다."""
+    with get_connection() as conn:
+        artist = conn.execute(
+            "SELECT name, display_name FROM artists WHERE id = %s",
+            (payload.artist_id,),
+        ).fetchone()
+    if artist is None:
+        raise HTTPException(status_code=404, detail="아티스트를 찾을 수 없습니다.")
+    try:
+        return await save_song_from_youtube(
+            artist=artist["display_name"] or artist["name"],
+            title=payload.title.strip(),
+            youtube_url=payload.youtube_url.strip(),
+            source_mode=payload.source_mode,
+            language_code=payload.language_code,
+        )
+    except (ValueError, LyricsPipelineError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/artists", response_model=ArtistWithSources, status_code=status.HTTP_201_CREATED)
 def create_artist(payload: ArtistCreate) -> dict:
     """API로 아티스트를 생성하고, X username이 있으면 출처도 함께 저장합니다."""
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO artists (name, display_name, notes)
-            VALUES (%s, %s, %s)
+            INSERT INTO artists (
+                name, display_name, artist_kind, agency, notes,
+                show_in_spotify, show_in_lyrics, show_in_youtube_lives
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (payload.name, payload.display_name, payload.notes),
+            (
+                payload.name, payload.display_name, payload.artist_kind, payload.agency, payload.notes,
+                payload.show_in_spotify, payload.show_in_lyrics, payload.show_in_youtube_lives,
+            ),
         )
         artist_id = cursor.fetchone()["id"]
 
@@ -428,9 +487,10 @@ def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
         rows = conn.execute(
             """
             SELECT
-                id, name, display_name, spotify_artist_id, spotify_name,
+                id, name, display_name, artist_kind, agency, spotify_artist_id, spotify_name,
                 spotify_image_url, spotify_url
             FROM artists
+            WHERE spotify_sync_enabled = TRUE AND show_in_spotify = TRUE
             ORDER BY COALESCE(display_name, name)
             """
         ).fetchall()
@@ -438,6 +498,8 @@ def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
         SpotifyRegisteredArtist(
             local_artist_id=row["id"],
             local_name=row["display_name"] or row["name"],
+            artist_kind=row["artist_kind"],
+            agency=row["agency"],
             spotify_artist_id=row["spotify_artist_id"],
             spotify_name=row["spotify_name"],
             image_url=row["spotify_image_url"],
@@ -448,37 +510,53 @@ def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
     ]
 
 
-@app.post("/spotify/artists/sync", response_model=list[SpotifyRegisteredArtist])
-async def sync_spotify_artists() -> list[SpotifyRegisteredArtist]:
-    """Spotify 검색으로 등록 아티스트의 프로필, 이미지와 ID를 갱신합니다."""
+@app.get(
+    "/spotify/artists/{artist_id}/candidates",
+    response_model=list[SpotifyArtistProfile],
+)
+async def get_spotify_artist_candidates(artist_id: int) -> list[SpotifyArtistProfile]:
+    """로컬 아티스트 이름에 대한 Spotify 매칭 후보를 반환합니다."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, display_name FROM artists WHERE id = %s AND spotify_sync_enabled = TRUE",
+            (artist_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Spotify 동기화 대상 아티스트를 찾을 수 없습니다.")
+    try:
+        candidates = await search_spotify_artist_candidates(
+            row["id"], row["display_name"] or row["name"]
+        )
+        if not candidates and row["display_name"]:
+            candidates = await search_spotify_artist_candidates(row["id"], row["name"])
+        return candidates
+    except SpotifyApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/spotify/artists/{artist_id}/sync", response_model=SpotifyRegisteredArtist)
+async def sync_spotify_artist(
+    artist_id: int,
+    spotify_artist_id: str,
+) -> SpotifyRegisteredArtist:
+    """사용자가 선택한 Spotify 아티스트를 로컬 아티스트에 매칭합니다."""
     if not spotify_configured():
         raise HTTPException(status_code=503, detail="Spotify API가 설정되어 있지 않습니다.")
 
     with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, name, display_name FROM artists ORDER BY id"
-        ).fetchall()
+        row = conn.execute(
+            "SELECT id, name, display_name FROM artists WHERE id = %s AND spotify_sync_enabled = TRUE",
+            (artist_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Spotify 동기화 대상 아티스트를 찾을 수 없습니다.")
 
-    for row in rows:
-        try:
-            profile = await search_spotify_artist(
-                row["id"],
-                row["display_name"] or row["name"],
-            )
-            if profile is None and row["display_name"]:
-                profile = await search_spotify_artist(row["id"], row["name"])
-        except SpotifyApiError as exc:
-            detail = str(exc)
-            if exc.status_code == 403 and "premium subscription" in detail.lower():
-                detail = (
-                    "Spotify 앱 소유자 계정에 활성 Premium 구독이 필요합니다. "
-                    "구독 상태 변경 후 API 반영까지 몇 시간이 걸릴 수 있습니다."
-                )
-            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
-        if profile is None:
-            continue
-        with get_connection() as conn:
-            conn.execute(
+    try:
+        profile = await get_spotify_artist(row["id"], spotify_artist_id)
+    except SpotifyApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    with get_connection() as conn:
+        conn.execute(
                 """
                 UPDATE artists
                 SET spotify_artist_id = %s,
@@ -489,16 +567,56 @@ async def sync_spotify_artists() -> list[SpotifyRegisteredArtist]:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
-                (
-                    profile.spotify_artist_id,
-                    profile.name,
-                    profile.image_url,
-                    profile.spotify_url,
-                    row["id"],
-                ),
-            )
-            conn.commit()
-    return list_spotify_artists()
+            (
+                profile.spotify_artist_id,
+                profile.name,
+                profile.image_url,
+                profile.spotify_url,
+                row["id"],
+            ),
+        )
+        conn.commit()
+    return next(artist for artist in list_spotify_artists() if artist.local_artist_id == artist_id)
+
+
+@app.delete("/spotify/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
+def exclude_spotify_artist(artist_id: int) -> Response:
+    """Spotify 매칭을 지우고 이후 전체 동기화 대상에서도 제외합니다."""
+    with get_connection() as conn:
+        _ensure_artist_exists(conn, artist_id)
+        conn.execute(
+            """
+            UPDATE artists
+            SET spotify_sync_enabled = FALSE,
+                spotify_artist_id = NULL,
+                spotify_name = NULL,
+                spotify_image_url = NULL,
+                spotify_url = NULL,
+                spotify_match_updated_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (artist_id,),
+        )
+        conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/spotify/artists/{artist_id}/enable", status_code=status.HTTP_204_NO_CONTENT)
+def enable_spotify_artist(artist_id: int) -> Response:
+    """제외한 아티스트를 Spotify 전체 동기화 대상에 다시 포함합니다."""
+    with get_connection() as conn:
+        _ensure_artist_exists(conn, artist_id)
+        conn.execute(
+            """
+            UPDATE artists
+            SET spotify_sync_enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (artist_id,),
+        )
+        conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get(
