@@ -84,15 +84,15 @@ function confirmExclusion(): void {
           <span>{{ artist.artist_kind === 'vtuber' ? 'Virtual Artist' : 'Music Artist' }}</span>
           <a v-if="artist.spotify_url" :href="artist.spotify_url" target="_blank" rel="noreferrer" class="spotify-attribution">Spotify에서 확인 ↗</a>
         </div>
-        <button class="button button--danger" :disabled="excludeArtist.isPending.value" @click="confirmExclusion">Spotify 연결 제거</button>
+        <UButton class="button button--danger" :disabled="excludeArtist.isPending.value" @click="confirmExclusion">Spotify 연결 제거</UButton>
       </section>
 
       <section class="catalog-toolbar">
         <div class="filter-tabs">
-          <button :class="{ active: releaseFilter === 'all' }" @click="releaseFilter = 'all'">전체</button>
-          <button :class="{ active: releaseFilter === 'album' }" @click="releaseFilter = 'album'">앨범</button>
-          <button :class="{ active: releaseFilter === 'single' }" @click="releaseFilter = 'single'">싱글 · EP</button>
-          <button :class="{ active: releaseFilter === 'appears_on' }" @click="releaseFilter = 'appears_on'">참여작</button>
+          <UButton :class="{ active: releaseFilter === 'all' }" @click="releaseFilter = 'all'">전체</UButton>
+          <UButton :class="{ active: releaseFilter === 'album' }" @click="releaseFilter = 'album'">앨범</UButton>
+          <UButton :class="{ active: releaseFilter === 'single' }" @click="releaseFilter = 'single'">싱글 · EP</UButton>
+          <UButton :class="{ active: releaseFilter === 'appears_on' }" @click="releaseFilter = 'appears_on'">참여작</UButton>
         </div>
         <span class="count-label">{{ filteredAlbums.length }} RELEASES</span>
       </section>
@@ -100,10 +100,10 @@ function confirmExclusion(): void {
       <div v-if="discographyQuery.isPending.value" class="release-grid"><div v-for="n in 8" :key="n" class="release-card release-card--loading" /></div>
       <div v-else-if="discographyQuery.isError.value" class="alert alert--error">{{ discographyQuery.error.value?.message || '디스코그래피 조회에 실패했습니다.' }}</div>
       <div v-else-if="filteredAlbums.length" class="release-grid">
-        <button v-for="album in filteredAlbums" :key="album.id" class="release-card" @click="selectedAlbumId = album.id">
+        <UButton v-for="album in filteredAlbums" :key="album.id" class="release-card" @click="selectedAlbumId = album.id">
           <div class="release-card__cover"><img v-if="album.image_url" :src="album.image_url" :alt="album.name" /><span v-else>♫</span><StatusPill :label="albumKind(album)" tone="green" /></div>
           <div class="release-card__body"><time>{{ album.release_date || '발매일 미상' }}</time><strong>{{ album.name }}</strong><p>{{ album.artists.join(', ') }}</p><span>{{ album.total_tracks }}곡</span></div>
-        </button>
+        </UButton>
       </div>
       <div v-else class="empty-state"><strong>표시할 발매작이 없습니다</strong></div>
     </template>

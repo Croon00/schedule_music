@@ -6,6 +6,17 @@ import type { Artist, ArtistKind, LyricsSourceMode } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 
 const artistKind = ref<ArtistKind>('vtuber')
+const languageOptions = [
+  { label: '일본어', value: 'ja' },
+  { label: '한국어', value: 'ko' },
+  { label: '영어', value: 'en' },
+]
+const lyricsSourceOptions = [
+  { label: 'YouTube 수동 자막', value: 'caption' },
+  { label: '영상 설명', value: 'description' },
+  { label: '상단 댓글', value: 'comment' },
+  { label: '음원 전사', value: 'audio' },
+]
 const agencyFilter = ref('all')
 const selectedArtist = ref<Artist | null>(null)
 const resultMessage = ref('')
@@ -49,32 +60,32 @@ function artistImage(artist: Artist): string | undefined {
   <div class="page lyrics-registration-page">
     <PageHeader eyebrow="LYRICS LIBRARY" title="YouTube 곡 · 가사 등록" description="아티스트를 선택하고 YouTube 영상에서 원문 가사, 번역과 발음을 생성해 저장합니다." />
     <div class="artist-kind-picker">
-      <button :class="{ active: artistKind === 'vtuber' }" @click="chooseKind('vtuber')"><span>VIRTUAL ARTIST</span><strong>VTuber</strong><em>{{ (artistsQuery.data.value || []).filter(a => a.artist_kind === 'vtuber').length }}명</em></button>
-      <button :class="{ active: artistKind === 'singer' }" @click="chooseKind('singer')"><span>MUSIC ARTIST</span><strong>가수</strong><em>{{ (artistsQuery.data.value || []).filter(a => a.artist_kind === 'singer').length }}명</em></button>
+      <UButton :class="{ active: artistKind === 'vtuber' }" @click="chooseKind('vtuber')"><span>VIRTUAL ARTIST</span><strong>VTuber</strong><em>{{ (artistsQuery.data.value || []).filter(a => a.artist_kind === 'vtuber').length }}명</em></UButton>
+      <UButton :class="{ active: artistKind === 'singer' }" @click="chooseKind('singer')"><span>MUSIC ARTIST</span><strong>가수</strong><em>{{ (artistsQuery.data.value || []).filter(a => a.artist_kind === 'singer').length }}명</em></UButton>
     </div>
     <div v-if="artistKind === 'vtuber'" class="agency-filter">
-      <button :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</button>
-      <button v-for="agency in agenciesQuery.data.value || []" :key="agency.id" :class="{ active: agencyFilter === agency.name }" @click="agencyFilter = agency.name">{{ agency.name === 'KAMITSUBAKI STUDIO' ? 'KAMITSUBAKI' : agency.name }}</button>
+      <UButton :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</UButton>
+      <UButton v-for="agency in agenciesQuery.data.value || []" :key="agency.id" :class="{ active: agencyFilter === agency.name }" @click="agencyFilter = agency.name">{{ agency.name === 'KAMITSUBAKI STUDIO' ? 'KAMITSUBAKI' : agency.name }}</UButton>
     </div>
     <section class="panel">
       <div class="section-heading"><div><p class="eyebrow">SELECT ARTIST</p><h2>아티스트 선택</h2></div><span class="count-label">{{ artists.length }} ARTISTS</span></div>
       <div class="lyrics-artist-grid">
-        <button v-for="artist in artists" :key="artist.id" class="lyrics-artist-card" :class="{ active: selectedArtist?.id === artist.id }" @click="selectedArtist = artist">
+        <UButton v-for="artist in artists" :key="artist.id" class="lyrics-artist-card" :class="{ active: selectedArtist?.id === artist.id }" @click="selectedArtist = artist">
           <span><b>{{ (artist.display_name || artist.name).slice(0, 1) }}</b><img v-if="artistImage(artist)" :src="artistImage(artist)" :alt="artist.display_name || artist.name" /></span>
           <strong>{{ artist.display_name || artist.name }}</strong><small>{{ artist.agency || (artist.artist_kind === 'vtuber' ? 'VTUBER' : 'SINGER') }}</small>
-        </button>
+        </UButton>
       </div>
     </section>
     <section v-if="selectedArtist" class="panel lyrics-song-form-panel">
       <div class="selected-artist-line"><strong>{{ selectedArtist.display_name || selectedArtist.name }}</strong><span>{{ selectedArtist.agency || '' }}</span></div>
       <form class="form-grid" @submit.prevent="submit">
-        <label>곡 제목<input v-model="form.title" required maxlength="200" placeholder="원문 곡 제목" /></label>
-        <label>원문 언어<select v-model="form.language_code"><option value="ja">일본어</option><option value="ko">한국어</option><option value="en">영어</option></select></label>
-        <label class="form-grid__wide">YouTube URL<input v-model="form.youtube_url" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
-        <label class="form-grid__wide">가사 추출 방식<select v-model="form.source_mode"><option value="caption">YouTube 수동 자막</option><option value="description">영상 설명</option><option value="comment">상단 댓글</option><option value="audio">음원 전사</option></select></label>
+        <label>곡 제목<UInput v-model="form.title" required maxlength="200" placeholder="원문 곡 제목" /></label>
+        <label>원문 언어<USelect v-model="form.language_code" :items="languageOptions" /></label>
+        <label class="form-grid__wide">YouTube URL<UInput v-model="form.youtube_url" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
+        <label class="form-grid__wide">가사 추출 방식<USelect v-model="form.source_mode" :items="lyricsSourceOptions" /></label>
         <p class="form-grid__wide lyrics-cost-note">음원 전사는 처리 시간이 길고 비용이 발생할 수 있습니다. 기본적으로 수동 자막을 권장합니다.</p>
         <p v-if="createSong.error.value" class="form-error form-grid__wide">{{ createSong.error.value.message }}</p>
-        <div class="form-actions"><button class="button button--primary" :disabled="createSong.isPending.value">{{ createSong.isPending.value ? '가사 추출·번역·저장 중…' : '곡과 가사 저장' }}</button></div>
+        <div class="form-actions"><UButton class="button button--primary" :disabled="createSong.isPending.value">{{ createSong.isPending.value ? '가사 추출·번역·저장 중…' : '곡과 가사 저장' }}</UButton></div>
       </form>
     </section>
     <div v-if="resultMessage" class="alert alert--success">{{ resultMessage }}</div>

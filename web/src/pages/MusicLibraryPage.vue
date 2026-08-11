@@ -176,29 +176,29 @@ function duration(milliseconds: number | null): string {
     </div>
 
     <section class="artist-kind-picker" aria-label="아티스트 유형 선택">
-      <button :class="{ active: artistKind === 'vtuber' }" @click="selectArtistKind('vtuber')">
+      <UButton :class="{ active: artistKind === 'vtuber' }" @click="selectArtistKind('vtuber')">
         <span>VIRTUAL ARTIST</span>
         <strong>VTuber</strong>
         <em>{{ allArtists.filter((artist) => artist.artist_kind === 'vtuber').length }}명</em>
-      </button>
-      <button :class="{ active: artistKind === 'singer' }" @click="selectArtistKind('singer')">
+      </UButton>
+      <UButton :class="{ active: artistKind === 'singer' }" @click="selectArtistKind('singer')">
         <span>MUSIC ARTIST</span>
         <strong>가수</strong>
         <em>{{ allArtists.filter((artist) => artist.artist_kind === 'singer').length }}명</em>
-      </button>
+      </UButton>
     </section>
 
     <div v-if="artistKind === 'vtuber'" class="agency-filter" aria-label="VTuber 소속 선택">
-      <button :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</button>
-      <button
+      <UButton :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</UButton>
+      <UButton
         v-for="agency in agenciesQuery.data.value || []"
         :key="agency.id"
         :class="{ active: agencyFilter === agency.name }"
         @click="agencyFilter = agency.name"
       >
         {{ agency.name === 'KAMITSUBAKI STUDIO' ? 'KAMITSUBAKI' : agency.name }}
-      </button>
-      <button class="agency-filter__add" @click="agencyModal = true">+ 소속 추가</button>
+      </UButton>
+      <UButton class="agency-filter__add" @click="agencyModal = true">+ 소속 추가</UButton>
     </div>
 
     <section v-if="artistKind" class="artist-rail-section">
@@ -210,7 +210,7 @@ function duration(milliseconds: number | null): string {
         <div v-for="index in 5" :key="index" class="artist-card artist-card--loading" />
       </div>
       <div v-else class="artist-card-grid">
-        <button
+        <UButton
           v-for="artist in artists"
           :key="artist.local_artist_id"
           class="artist-card"
@@ -226,7 +226,7 @@ function duration(milliseconds: number | null): string {
             <strong>{{ artist.spotify_name || artist.local_name }}</strong>
             <em>{{ artist.matched ? '카탈로그 보기 →' : (searchCandidates.isPending.value && searchCandidates.variables.value === artist.local_artist_id ? '후보 검색 중…' : '클릭하여 후보 선택') }}</em>
           </div>
-        </button>
+        </UButton>
       </div>
     </section>
     <section v-else class="empty-state artist-kind-empty">
@@ -287,26 +287,26 @@ function duration(milliseconds: number | null): string {
           <a v-if="selectedArtist.spotify_url" :href="selectedArtist.spotify_url" target="_blank" rel="noreferrer" class="spotify-attribution">
             Spotify에서 보기 ↗
           </a>
-          <button
+          <UButton
             class="button button--danger"
             :disabled="excludeArtist.isPending.value"
             @click="confirmSpotifyExclusion(selectedArtist)"
           >
             {{ excludeArtist.isPending.value ? '제외 중…' : 'Spotify 동기화 제외' }}
-          </button>
+          </UButton>
         </div>
       </section>
 
       <section class="catalog-toolbar">
         <div class="filter-tabs">
-          <button :class="{ active: releaseFilter === 'all' }" @click="releaseFilter = 'all'">전체</button>
-          <button :class="{ active: releaseFilter === 'album' }" @click="releaseFilter = 'album'">앨범</button>
-          <button :class="{ active: releaseFilter === 'single' }" @click="releaseFilter = 'single'">싱글 · EP</button>
-          <button :class="{ active: releaseFilter === 'appears_on' }" @click="releaseFilter = 'appears_on'">참여작</button>
+          <UButton :class="{ active: releaseFilter === 'all' }" @click="releaseFilter = 'all'">전체</UButton>
+          <UButton :class="{ active: releaseFilter === 'album' }" @click="releaseFilter = 'album'">앨범</UButton>
+          <UButton :class="{ active: releaseFilter === 'single' }" @click="releaseFilter = 'single'">싱글 · EP</UButton>
+          <UButton :class="{ active: releaseFilter === 'appears_on' }" @click="releaseFilter = 'appears_on'">참여작</UButton>
         </div>
         <div class="view-toggle" aria-label="보기 방식">
-          <button :class="{ active: viewMode === 'grid' }" aria-label="이미지 보기" @click="viewMode = 'grid'">▦</button>
-          <button :class="{ active: viewMode === 'list' }" aria-label="목록 보기" @click="viewMode = 'list'">☷</button>
+          <UButton :class="{ active: viewMode === 'grid' }" aria-label="이미지 보기" @click="viewMode = 'grid'">▦</UButton>
+          <UButton :class="{ active: viewMode === 'list' }" aria-label="목록 보기" @click="viewMode = 'list'">☷</UButton>
         </div>
       </section>
 
@@ -317,7 +317,7 @@ function duration(milliseconds: number | null): string {
         {{ discographyQuery.error.value?.message || '디스코그래피 조회에 실패했습니다.' }}
       </div>
       <div v-else-if="filteredAlbums.length" :class="viewMode === 'grid' ? 'release-grid' : 'release-list'">
-        <button
+        <UButton
           v-for="album in filteredAlbums"
           :key="album.id"
           :class="viewMode === 'grid' ? 'release-card' : 'release-row'"
@@ -334,7 +334,7 @@ function duration(milliseconds: number | null): string {
             <p>{{ album.artists.join(', ') }}</p>
             <em>{{ album.total_tracks }} TRACKS</em>
           </div>
-        </button>
+        </UButton>
       </div>
       <div v-else class="empty-state">
         <span>♫</span><strong>표시할 발매작이 없습니다</strong><p>다른 필터를 선택하거나 Spotify 동기화를 다시 실행해 주세요.</p>
@@ -348,11 +348,11 @@ function duration(milliseconds: number | null): string {
       @close="agencyModal = false"
     >
       <form class="form-grid" @submit.prevent="submitAgency">
-        <label class="form-grid__wide">소속 이름<input v-model="newAgencyName" required maxlength="120" placeholder="예: hololive production" /></label>
+        <label class="form-grid__wide">소속 이름<UInput v-model="newAgencyName" required maxlength="120" placeholder="예: hololive production" /></label>
         <p v-if="createAgency.error.value" class="form-error">{{ createAgency.error.value.message }}</p>
         <div class="form-actions">
-          <button type="button" class="button button--ghost" @click="agencyModal = false">취소</button>
-          <button class="button button--primary" :disabled="createAgency.isPending.value">{{ createAgency.isPending.value ? '추가 중…' : '소속 추가' }}</button>
+          <UButton type="button" class="button button--ghost" @click="agencyModal = false">취소</UButton>
+          <UButton class="button button--primary" :disabled="createAgency.isPending.value">{{ createAgency.isPending.value ? '추가 중…' : '소속 추가' }}</UButton>
         </div>
       </form>
     </AppModal>
@@ -373,9 +373,9 @@ function duration(milliseconds: number | null): string {
             <p>{{ candidate.genres.length ? candidate.genres.join(' · ') : '장르 정보 없음' }}</p>
             <a v-if="candidate.spotify_url" :href="candidate.spotify_url" target="_blank" rel="noreferrer">Spotify에서 확인 ↗</a>
           </div>
-          <button class="button button--spotify" :disabled="syncArtist.isPending.value" @click="confirmCandidate(candidate)">
+          <UButton class="button button--spotify" :disabled="syncArtist.isPending.value" @click="confirmCandidate(candidate)">
             {{ syncArtist.isPending.value ? '등록 중…' : '이 아티스트로 등록' }}
-          </button>
+          </UButton>
         </article>
       </div>
       <div v-else class="empty-state"><strong>Spotify 검색 후보가 없습니다</strong><p>등록된 아티스트 이름을 확인해 주세요.</p></div>

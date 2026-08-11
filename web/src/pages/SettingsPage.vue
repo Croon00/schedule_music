@@ -22,8 +22,8 @@ function connectGoogle(): void {
         <div class="integration-card__body">
           <div><h2>Google Calendar</h2><StatusPill label="사용자 연결 필요" tone="amber" /></div>
           <p>라이브 일정과 티켓 마감일을 개인 캘린더에 등록합니다.</p>
-          <label>Discord 사용자 ID<input v-model="discordUserId" inputmode="numeric" placeholder="123456789012345678" /></label>
-          <button class="button button--primary" :disabled="!discordUserId.trim()" @click="connectGoogle">Google 계정 연결</button>
+          <label>Discord 사용자 ID<UInput v-model="discordUserId" inputmode="numeric" placeholder="123456789012345678" /></label>
+          <UButton class="button button--primary" :disabled="!discordUserId.trim()" @click="connectGoogle">Google 계정 연결</UButton>
         </div>
       </article>
       <article class="panel integration-card">
@@ -39,7 +39,7 @@ function connectGoogle(): void {
         <div class="integration-card__body">
           <div><h2>FastAPI</h2><StatusPill :label="health.isError.value ? '연결 실패' : '정상 연결'" :tone="health.isError.value ? 'amber' : 'green'" /></div>
           <p>아티스트, 소스, 일정 후보와 Wiki Studio의 유일한 데이터 경계입니다.</p>
-          <button class="button button--ghost" @click="health.refetch()">상태 다시 확인</button>
+          <UButton class="button button--ghost" @click="health.refetch()">상태 다시 확인</UButton>
         </div>
       </article>
     </section>

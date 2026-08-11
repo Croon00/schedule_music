@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
@@ -146,32 +147,53 @@ async def poll_youtube_channel_monitors(
 
 
 async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[str, Any]]:
+    """Return every uploaded video whose title identifies it as an utawaku.
+
+    The uploads playlist is paginated at 50 items by YouTube.  A channel
+    monitor must therefore follow ``nextPageToken``; otherwise older archives
+    silently never enter the setlist collection pipeline.
+    """
+    candidates: list[dict[str, str]] = []
+    page_token: str | None = None
     async with httpx.AsyncClient(timeout=30) as client:
-        playlist_response = await client.get(
-            f"{YOUTUBE_API_BASE_URL}/playlistItems",
-            params={
+        while True:
+            params = {
                 "part": "snippet,contentDetails", "playlistId": uploads_playlist_id,
                 "maxResults": "50", "key": settings.youtube_api_key,
-            },
-        )
-        playlist_response.raise_for_status()
-        candidates = [
-            {"id": (item.get("contentDetails") or {}).get("videoId"),
-             "title": (item.get("snippet") or {}).get("title") or ""}
-            for item in playlist_response.json().get("items") or []
-            if "歌枠" in ((item.get("snippet") or {}).get("title") or "")
-        ]
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            playlist_response = await client.get(
+                f"{YOUTUBE_API_BASE_URL}/playlistItems", params=params
+            )
+            playlist_response.raise_for_status()
+            payload = playlist_response.json()
+            candidates.extend(
+                {
+                    "id": (item.get("contentDetails") or {}).get("videoId"),
+                    "title": (item.get("snippet") or {}).get("title") or "",
+                }
+                for item in payload.get("items") or []
+                if "歌枠" in ((item.get("snippet") or {}).get("title") or "")
+            )
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
+
         ids = [item["id"] for item in candidates if item["id"]]
         if not ids:
             return []
-        videos_response = await client.get(
-            f"{YOUTUBE_API_BASE_URL}/videos",
-            params={
-                "part": "snippet,liveStreamingDetails", "id": ",".join(ids),
-                "key": settings.youtube_api_key,
-            },
-        )
-        videos_response.raise_for_status()
+        video_items: list[dict[str, Any]] = []
+        for index in range(0, len(ids), 50):
+            videos_response = await client.get(
+                f"{YOUTUBE_API_BASE_URL}/videos",
+                params={
+                    "part": "snippet,liveStreamingDetails", "id": ",".join(ids[index:index + 50]),
+                    "key": settings.youtube_api_key,
+                },
+            )
+            videos_response.raise_for_status()
+            video_items.extend(videos_response.json().get("items") or [])
     return [
         {
             "youtube_video_id": item["id"],
@@ -180,8 +202,70 @@ async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[s
                 (item.get("liveStreamingDetails") or {}).get("actualEndTime")
             ),
         }
-        for item in videos_response.json().get("items") or []
+        for item in video_items
     ]
+
+
+async def backfill_youtube_channel(
+    *,
+    channel_url: str,
+    artist_name: str,
+    max_videos: int | None = None,
+    concurrency: int = 1,
+) -> dict[str, int]:
+    """Store all historical utawaku archives for one artist.
+
+    The archive insertion is idempotent by YouTube video ID, so the operation
+    is safe to rerun after comments are updated or a collection run fails.
+    """
+    channel = await resolve_youtube_channel(channel_url)
+    videos = await _fetch_recent_singing_streams(channel["uploads_playlist_id"])
+    with get_connection() as conn:
+        existing_ids = {
+            row["youtube_video_id"]
+            for row in conn.execute(
+                "SELECT youtube_video_id FROM youtube_live_archives "
+                "WHERE lower(performer_name) = lower(%s)",
+                (artist_name,),
+            ).fetchall()
+        }
+    videos = [video for video in videos if video["youtube_video_id"] not in existing_ids]
+    if max_videos is not None:
+        videos = videos[:max(1, max_videos)]
+    async def store(video: dict[str, Any]) -> tuple[bool, bool]:
+        try:
+            archive_id = await add_youtube_live_url(
+                f"https://www.youtube.com/watch?v={video['youtube_video_id']}",
+                artist_name,
+                enrich_karaoke=False,
+            )
+            with get_connection() as conn:
+                row = conn.execute(
+                    "SELECT jsonb_array_length(setlist) AS song_count "
+                    "FROM youtube_live_archives WHERE id = %s",
+                    (archive_id,),
+                ).fetchone()
+            return True, bool(row and row["song_count"])
+        except Exception:
+            # Do not log HTTP request URLs here: they include the API key in
+            # the query string and can leak it into routine task logs.
+            logger.warning("YouTube historical backfill failed for video %s", video["youtube_video_id"])
+            return False, False
+
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 10)))
+
+    async def limited_store(video: dict[str, Any]) -> tuple[bool, bool]:
+        async with semaphore:
+            return await store(video)
+
+    outcomes = await asyncio.gather(*(limited_store(video) for video in videos))
+    result = {
+        "videos_found": len(videos),
+        "archives_saved": sum(saved for saved, _ in outcomes),
+        "setlists_found": sum(found for _, found in outcomes),
+        "failed": sum(not saved for saved, _ in outcomes),
+    }
+    return result
 
 
 def _upsert_channel_videos(monitor_id: int, videos: list[dict[str, Any]]) -> None:

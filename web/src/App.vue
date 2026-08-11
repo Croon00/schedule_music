@@ -21,7 +21,7 @@ const navigation = [
 <template>
   <UApp>
     <div class="app-shell">
-      <button class="mobile-menu" aria-label="메뉴 열기" @click="ui.toggleSidebar">☰</button>
+      <UButton class="mobile-menu" aria-label="메뉴 열기" @click="ui.toggleSidebar">☰</UButton>
       <div v-if="ui.sidebarOpen" class="sidebar-scrim" @click="ui.closeSidebar" />
       <aside class="sidebar" :class="{ 'sidebar--open': ui.sidebarOpen }">
         <div class="brand">

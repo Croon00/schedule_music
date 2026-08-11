@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response, status
@@ -36,6 +37,7 @@ from app.integrations.youtube_live_archive import (
     list_youtube_live_archives,
     search_youtube_song_performances,
 )
+from app.integrations.youtube_channel_monitor import backfill_youtube_channel
 from app.integrations.spotify import (
     SpotifyAlbumDetail,
     SpotifyAlbumSummary,
@@ -77,10 +79,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+youtube_backfill_tasks: set[asyncio.Task] = set()
 
 
 class YouTubeLiveCreate(BaseModel):
     youtube_url: HttpUrl
+    artist_name: str
+
+
+class YouTubeChannelBackfillCreate(BaseModel):
+    channel_url: HttpUrl
     artist_name: str
 
 
@@ -102,6 +110,21 @@ async def create_youtube_live(payload: YouTubeLiveCreate) -> dict:
     if archive is None:
         raise HTTPException(status_code=500, detail="저장된 기록을 찾지 못했습니다.")
     return archive
+
+
+@app.post("/youtube-lives/backfills", status_code=status.HTTP_202_ACCEPTED)
+async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate) -> dict[str, str]:
+    """Start an idempotent historical utawaku collection without blocking the UI."""
+    task = asyncio.create_task(
+        backfill_youtube_channel(
+            channel_url=str(payload.channel_url),
+            artist_name=payload.artist_name.strip(),
+            concurrency=3,
+        )
+    )
+    youtube_backfill_tasks.add(task)
+    task.add_done_callback(youtube_backfill_tasks.discard)
+    return {"status": "started", "artist_name": payload.artist_name.strip()}
 
 
 @app.get("/youtube-lives")

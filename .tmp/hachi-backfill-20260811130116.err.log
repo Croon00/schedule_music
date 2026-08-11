@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\git\schedule_music\scripts\backfill_youtube_channel.py", line 8, in <module>
+    from app.integrations.youtube_channel_monitor import backfill_youtube_channel
+ModuleNotFoundError: No module named 'app'

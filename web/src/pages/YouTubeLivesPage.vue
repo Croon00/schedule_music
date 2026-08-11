@@ -22,6 +22,10 @@ const selectedId = ref<number | null>(null)
 const youtubeUrl = ref('')
 const artistName = ref('')
 const searchMode = ref<'artist' | 'song'>('song')
+const searchModeOptions = [
+  { label: '아티스트', value: 'artist' },
+  { label: '곡 제목', value: 'song' },
+]
 const searchText = ref('')
 const searchResults = ref<YouTubePerformanceSearchResult[]>([])
 
@@ -123,10 +127,10 @@ function hideBrokenImage(event: Event): void {
     />
 
     <div v-if="!selectedArtist" class="agency-filter youtube-agency-filter" aria-label="VTuber 소속 선택">
-      <button :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</button>
-      <button v-for="agency in agenciesQuery.data.value || []" :key="agency.id" :class="{ active: agencyFilter === agency.name }" @click="agencyFilter = agency.name">
+      <UButton :class="{ active: agencyFilter === 'all' }" @click="agencyFilter = 'all'">전체</UButton>
+      <UButton v-for="agency in agenciesQuery.data.value || []" :key="agency.id" :class="{ active: agencyFilter === agency.name }" @click="agencyFilter = agency.name">
         {{ agency.name === 'KAMITSUBAKI STUDIO' ? 'KAMITSUBAKI' : agency.name }}
-      </button>
+      </UButton>
     </div>
 
     <section v-if="!selectedArtist" class="artist-section">
@@ -136,11 +140,11 @@ function hideBrokenImage(event: Event): void {
       </div>
       <div v-if="artistsQuery.isPending.value" class="artist-selector artist-selector--grid"><i v-for="n in 8" :key="n" class="artist-select-card loading" /></div>
       <div v-else-if="artists.length" class="artist-selector artist-selector--grid">
-        <button v-for="artist in artists" :key="artist.id" class="artist-select-card" :class="{ active: artist.id === selectedArtistId }" @click="selectArtist(artist)">
+        <UButton v-for="artist in artists" :key="artist.id" class="artist-select-card" :class="{ active: artist.id === selectedArtistId }" @click="selectArtist(artist)">
           <span class="artist-image"><b>{{ (artist.display_name || artist.name).slice(0, 1) }}</b><img v-if="artistImage(artist)" :src="artistImage(artist)" :alt="artist.display_name || artist.name" @error="hideBrokenImage" /></span>
           <strong>{{ artist.display_name || artist.name }}</strong>
           <small>{{ artist.sources.length }} SOURCES</small>
-        </button>
+        </UButton>
       </div>
       <div v-else class="empty-state"><strong>등록된 아티스트가 없습니다</strong><p>먼저 아티스트 관리에서 아티스트를 등록하세요.</p></div>
       <small v-if="artists.length" class="avatar-credit">프로필 이미지: X · unavatar</small>
@@ -161,8 +165,8 @@ function hideBrokenImage(event: Event): void {
       <div class="archive-actions">
         <span class="count-label">{{ archives.data.value?.length || 0 }} LIVES</span>
         <div class="view-toggle" aria-label="보기 방식">
-          <button :class="{ active: viewMode === 'grid' }" aria-label="카드 보기" @click="viewMode = 'grid'">▦</button>
-          <button :class="{ active: viewMode === 'list' }" aria-label="목록 보기" @click="viewMode = 'list'">☷</button>
+          <UButton :class="{ active: viewMode === 'grid' }" aria-label="카드 보기" @click="viewMode = 'grid'">▦</UButton>
+          <UButton :class="{ active: viewMode === 'list' }" aria-label="목록 보기" @click="viewMode = 'list'">☷</UButton>
         </div>
       </div>
     </section>
@@ -171,7 +175,7 @@ function hideBrokenImage(event: Event): void {
     <div v-else-if="selectedArtist && archives.isError.value" class="alert alert--error">우타와꾸 기록을 불러오지 못했습니다.</div>
     <div v-else-if="selectedArtist && !archives.data.value?.length" class="panel empty-state"><span>♫</span><strong>저장된 우타와꾸가 없습니다</strong><p>오른쪽 아래 등록 버튼으로 첫 방송을 추가할 수 있습니다.</p></div>
     <div v-else-if="selectedArtist" :class="viewMode === 'grid' ? 'archive-grid' : 'archive-list'">
-      <button v-for="archive in archives.data.value" :key="archive.id" :class="viewMode === 'grid' ? 'archive-card' : 'archive-row'" @click="openArchive(archive)">
+      <UButton v-for="archive in archives.data.value" :key="archive.id" :class="viewMode === 'grid' ? 'archive-card' : 'archive-row'" @click="openArchive(archive)">
         <div class="archive-cover">
           <img v-if="thumbnail(archive)" :src="thumbnail(archive)" :alt="archive.video_title || archive.artist_name" />
           <span v-else>▶</span>
@@ -182,15 +186,15 @@ function hideBrokenImage(event: Event): void {
           <strong>{{ archive.video_title || archive.artist_name }}</strong>
           <span>{{ archive.artist_name }}</span>
         </div>
-      </button>
+      </UButton>
     </div>
 
     <details v-if="selectedArtist" class="panel performance-search-panel">
       <summary><span><b>전체 가창 기록 검색</b><small>아티스트 또는 곡 제목으로 모든 방송을 검색합니다.</small></span><em>열기</em></summary>
       <form class="performance-search" @submit.prevent="searchPerformances.mutate()">
-        <select v-model="searchMode"><option value="artist">아티스트</option><option value="song">곡 제목</option></select>
-        <input v-model="searchText" required :placeholder="searchMode === 'artist' ? '예: HACHI' : '예: アポリア'" />
-        <button class="button button--primary" :disabled="searchPerformances.isPending.value">검색</button>
+        <USelect v-model="searchMode" :items="searchModeOptions" />
+        <UInput v-model="searchText" required :placeholder="searchMode === 'artist' ? '예: HACHI' : '예: アポリア'" />
+        <UButton class="button button--primary" :disabled="searchPerformances.isPending.value">검색</UButton>
       </form>
       <p v-if="searchPerformances.error.value" class="form-error">{{ searchPerformances.error.value.message }}</p>
       <div v-if="searchResults.length" class="performance-results">
@@ -201,17 +205,17 @@ function hideBrokenImage(event: Event): void {
       <div v-else-if="searchPerformances.isSuccess.value" class="empty-state compact"><strong>검색된 가창 기록이 없습니다</strong></div>
     </details>
 
-    <button v-if="selectedArtist" class="floating-register" aria-label="우타와꾸 등록" @click="openRegistration"><span>＋</span> 우타와꾸 등록</button>
+    <UButton v-if="selectedArtist" class="floating-register" aria-label="우타와꾸 등록" @click="openRegistration"><span>＋</span> 우타와꾸 등록</UButton>
 
     <AppModal :open="registrationOpen" title="우타와꾸 등록" description="아티스트와 YouTube URL을 입력하면 방송 정보와 댓글 셋리스트를 저장합니다." @close="registrationOpen = false">
       <form class="form-grid" @submit.prevent="addLive.mutate()">
         <label class="form-grid__wide">아티스트 이름
-          <input v-model="artistName" list="registered-artists" required placeholder="예: HACHI" />
+          <UInput v-model="artistName" list="registered-artists" required placeholder="예: HACHI" />
           <datalist id="registered-artists"><option v-for="artist in vtubers" :key="artist.id" :value="artist.name">{{ artist.display_name || artist.name }}</option></datalist>
         </label>
-        <label class="form-grid__wide">YouTube URL<input v-model="youtubeUrl" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
+        <label class="form-grid__wide">YouTube URL<UInput v-model="youtubeUrl" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
         <p v-if="addLive.error.value" class="form-error">{{ addLive.error.value.message }}</p>
-        <div class="form-actions"><button type="button" class="button button--ghost" @click="registrationOpen = false">취소</button><button class="button button--primary" :disabled="addLive.isPending.value">{{ addLive.isPending.value ? '셋리스트 확인 중…' : '등록' }}</button></div>
+        <div class="form-actions"><UButton type="button" class="button button--ghost" @click="registrationOpen = false">취소</UButton><UButton class="button button--primary" :disabled="addLive.isPending.value">{{ addLive.isPending.value ? '셋리스트 확인 중…' : '등록' }}</UButton></div>
       </form>
     </AppModal>
 

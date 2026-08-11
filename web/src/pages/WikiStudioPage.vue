@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/api/client'
 import type { SongArticleInput } from '@/api/types'
@@ -12,6 +12,13 @@ const instruction = ref('')
 const output = ref('')
 const copied = ref(false)
 const templateForm = reactive({ template_id: '', name: '', description: '', template_example: '' })
+const templateOptions = computed(() => [
+  { label: '기본 렌더러', value: '' },
+  ...(templatesQuery.data.value ?? []).map((template) => ({
+    label: template.name,
+    value: template.template_id,
+  })),
+])
 const song = reactive({
   title: '', artist: '', release_date: '', album: '', album_type: '싱글',
   lyricist: '', composer: '', arranger: '', intro: '', youtube_url: '', categories: '',
@@ -63,22 +70,22 @@ async function copyOutput(): Promise<void> {
       <section class="panel">
         <div class="panel__heading"><div><p class="eyebrow">SONG DATA</p><h2>곡 정보</h2></div><span class="count-label">INPUT</span></div>
         <form class="form-grid" @submit.prevent="renderArticle.mutate()">
-          <label>곡명<input v-model="song.title" required /></label><label>아티스트<input v-model="song.artist" required /></label>
-          <label>발매일<input v-model="song.release_date" placeholder="2026-08-12" /></label><label>앨범<input v-model="song.album" /></label>
-          <label>작사<input v-model="song.lyricist" /></label><label>작곡<input v-model="song.composer" /></label>
-          <label>편곡<input v-model="song.arranger" /></label><label>YouTube URL<input v-model="song.youtube_url" type="url" /></label>
-          <label class="form-grid__wide">분류 (쉼표 구분)<input v-model="song.categories" placeholder="일본 음악, 버추얼 유튜버 오리지널 곡" /></label>
-          <label class="form-grid__wide">한 줄 소개<textarea v-model="song.intro" rows="2" /></label>
-          <label class="form-grid__wide">가사 원문<textarea v-model="song.lyricsText" rows="7" placeholder="한 줄에 한 소절씩 입력" /></label>
-          <label class="form-grid__wide">저장 템플릿<select v-model="selectedTemplate"><option value="">기본 렌더러</option><option v-for="template in templatesQuery.data.value" :key="template.template_id" :value="template.template_id">{{ template.name }}</option></select></label>
-          <label v-if="selectedTemplate" class="form-grid__wide">AI 추가 지시<input v-model="instruction" maxlength="1000" placeholder="표 구성은 유지하고 개요를 간결하게" /></label>
+          <label>곡명<UInput v-model="song.title" required /></label><label>아티스트<UInput v-model="song.artist" required /></label>
+          <label>발매일<UInput v-model="song.release_date" placeholder="2026-08-12" /></label><label>앨범<UInput v-model="song.album" /></label>
+          <label>작사<UInput v-model="song.lyricist" /></label><label>작곡<UInput v-model="song.composer" /></label>
+          <label>편곡<UInput v-model="song.arranger" /></label><label>YouTube URL<UInput v-model="song.youtube_url" type="url" /></label>
+          <label class="form-grid__wide">분류 (쉼표 구분)<UInput v-model="song.categories" placeholder="일본 음악, 버추얼 유튜버 오리지널 곡" /></label>
+          <label class="form-grid__wide">한 줄 소개<UTextarea v-model="song.intro" rows="2" /></label>
+          <label class="form-grid__wide">가사 원문<UTextarea v-model="song.lyricsText" rows="7" placeholder="한 줄에 한 소절씩 입력" /></label>
+          <label class="form-grid__wide">저장 템플릿<USelect v-model="selectedTemplate" :items="templateOptions" /></label>
+          <label v-if="selectedTemplate" class="form-grid__wide">AI 추가 지시<UInput v-model="instruction" maxlength="1000" placeholder="표 구성은 유지하고 개요를 간결하게" /></label>
           <p v-if="renderArticle.error.value" class="form-error">{{ renderArticle.error.value.message }}</p>
-          <div class="form-actions"><button class="button button--primary" :disabled="renderArticle.isPending.value">{{ renderArticle.isPending.value ? '생성 중…' : selectedTemplate ? '템플릿으로 생성' : '문서 생성' }}</button></div>
+          <div class="form-actions"><UButton class="button button--primary" :disabled="renderArticle.isPending.value">{{ renderArticle.isPending.value ? '생성 중…' : selectedTemplate ? '템플릿으로 생성' : '문서 생성' }}</UButton></div>
         </form>
       </section>
 
       <section class="panel output-panel">
-        <div class="panel__heading"><div><p class="eyebrow">RENDERED WIKITEXT</p><h2>생성 결과</h2></div><button v-if="output" class="button button--ghost" @click="copyOutput">{{ copied ? '복사됨 ✓' : '복사' }}</button></div>
+        <div class="panel__heading"><div><p class="eyebrow">RENDERED WIKITEXT</p><h2>생성 결과</h2></div><UButton v-if="output" class="button button--ghost" @click="copyOutput">{{ copied ? '복사됨 ✓' : '복사' }}</UButton></div>
         <pre v-if="output" class="wiki-output">{{ output }}</pre>
         <div v-else class="empty-state"><span>✦</span><strong>문서가 이곳에 생성됩니다</strong><p>입력값은 HTML로 렌더링하지 않고 안전한 텍스트로 보여줍니다.</p></div>
       </section>
@@ -87,12 +94,12 @@ async function copyOutput(): Promise<void> {
     <details class="panel template-builder">
       <summary><span><b>재사용 템플릿 등록</b><small>기존 나무위키 문서 예시를 저장해 AI 렌더링에 사용합니다.</small></span><span>＋</span></summary>
       <form class="form-grid" @submit.prevent="saveTemplate.mutate()">
-        <label>템플릿 ID<input v-model="templateForm.template_id" required pattern="[A-Za-z0-9_-]+" placeholder="hachi-song" /></label>
-        <label>이름<input v-model="templateForm.name" required placeholder="HACHI 곡 문서" /></label>
-        <label class="form-grid__wide">설명<input v-model="templateForm.description" /></label>
-        <label class="form-grid__wide">문서 예시<textarea v-model="templateForm.template_example" required rows="10" /></label>
+        <label>템플릿 ID<UInput v-model="templateForm.template_id" required pattern="[A-Za-z0-9_-]+" placeholder="hachi-song" /></label>
+        <label>이름<UInput v-model="templateForm.name" required placeholder="HACHI 곡 문서" /></label>
+        <label class="form-grid__wide">설명<UInput v-model="templateForm.description" /></label>
+        <label class="form-grid__wide">문서 예시<UTextarea v-model="templateForm.template_example" required rows="10" /></label>
         <p v-if="saveTemplate.error.value" class="form-error">{{ saveTemplate.error.value.message }}</p>
-        <div class="form-actions"><button class="button button--primary" :disabled="saveTemplate.isPending.value">템플릿 저장</button></div>
+        <div class="form-actions"><UButton class="button button--primary" :disabled="saveTemplate.isPending.value">템플릿 저장</UButton></div>
       </form>
     </details>
   </div>

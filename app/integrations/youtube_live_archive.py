@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any
 
+import httpx
 from psycopg.types.json import Jsonb
 
 from app.core.config import settings
@@ -44,12 +45,24 @@ def register_youtube_live(
         conn.commit()
 
 
-async def add_youtube_live_url(youtube_url: str, artist_name: str | None = None) -> int:
+async def add_youtube_live_url(
+    youtube_url: str,
+    artist_name: str | None = None,
+    *,
+    enrich_karaoke: bool = True,
+) -> int:
     """Register a URL directly and immediately collect its dated setlist."""
     video_id = extract_youtube_video_id(youtube_url)
     canonical_url = canonical_youtube_watch_url(youtube_url)
     metadata = await fetch_video_metadata(video_id)
-    context = await fetch_setlist_comment(video_id)
+    try:
+        context = await fetch_setlist_comment(video_id)
+    except httpx.HTTPStatusError as exc:
+        # Comments can be disabled for an otherwise public archive.  Preserve
+        # its date and video link as a pending record instead of failing an
+        # entire channel backfill.
+        logger.info("Comments unavailable for YouTube video %s: %s", video_id, exc.response.status_code)
+        context = None
     comment = context.text if context else None
     setlist = parse_setlist_comment(comment or "")
 
@@ -100,7 +113,8 @@ async def add_youtube_live_url(youtube_url: str, artist_name: str | None = None)
             archive_id = row["id"]
         conn.commit()
     _replace_song_performances(archive_id, setlist)
-    await _enrich_karaoke_numbers(archive_id)
+    if enrich_karaoke:
+        await _enrich_karaoke_numbers(archive_id)
     return int(archive_id)
 
 
@@ -309,7 +323,7 @@ def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) 
             LEFT JOIN artist_sources s ON s.id = y.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             LEFT JOIN source_items si ON si.id = y.source_item_id
-            WHERE (%s IS NULL OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%')
+            WHERE (%s::text IS NULL OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%')
             ORDER BY COALESCE(y.broadcast_at, y.published_at) DESC NULLS LAST, y.id DESC
             LIMIT %s
             """,

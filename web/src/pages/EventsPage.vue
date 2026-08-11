@@ -36,6 +36,30 @@ const form = reactive({
 const artistMap = computed(() => new Map(
   (artistsQuery.data.value ?? []).map((artist) => [artist.id, artist.display_name || artist.name]),
 ))
+const artistFilterOptions = computed(() => [
+  { label: '전체 아티스트', value: '' },
+  ...(artistsQuery.data.value ?? []).map((artist) => ({
+    label: artist.display_name || artist.name,
+    value: artist.id,
+  })),
+])
+const eventTypeOptions = [
+  { label: '라이브 공연', value: 'live_event' },
+  { label: '티켓 접수', value: 'ticket' },
+]
+const eventFormatOptions = [
+  { label: '현장 공연', value: 'onsite' },
+  { label: '현장 + 온라인 중계', value: 'hybrid' },
+  { label: '미확인', value: 'unknown' },
+]
+const statusOptions = [
+  { label: '전체 상태', value: '' },
+  { label: '검토 필요', value: 'needs_review' },
+  { label: '준비 완료', value: 'ready' },
+  { label: '동기화됨', value: 'synced' },
+  { label: '무시됨', value: 'ignored' },
+]
+const eventStatusOptions = statusOptions.filter((item) => item.value)
 const liveEvents = computed(() => (eventsQuery.data.value ?? []).filter(
   (event) => event.event_type === 'live_event'
     && ['onsite', 'hybrid'].includes(event.event_format)
@@ -149,45 +173,34 @@ const formatLabels: Record<EventFormat, string> = {
       title="라이브 일정"
       description="공연 일정과 티켓 접수 일정을 분리하고, 아티스트별 라이브를 달력에서 확인합니다."
     >
-      <button class="button button--primary" @click="modalOpen = true">+ 일정 등록</button>
+      <UButton class="button button--primary" @click="modalOpen = true">+ 일정 등록</UButton>
     </PageHeader>
 
     <section class="panel schedule-controls">
       <div class="filter-group">
         <span>종류</span>
         <div class="filter-tabs">
-          <button :class="{ active: typeFilter === 'live_event' }" @click="selectType('live_event')">라이브</button>
-          <button :class="{ active: typeFilter === 'ticket' }" @click="selectType('ticket')">티켓</button>
+          <UButton :class="{ active: typeFilter === 'live_event' }" @click="selectType('live_event')">라이브</UButton>
+          <UButton :class="{ active: typeFilter === 'ticket' }" @click="selectType('ticket')">티켓</UButton>
         </div>
       </div>
       <div v-if="typeFilter === 'live_event'" class="filter-group format-filter">
         <span>공연 형태</span>
         <div class="filter-tabs">
-          <button :class="{ active: formatFilter === 'onsite' }" @click="selectFormat('onsite')">현장</button>
-          <button :class="{ active: formatFilter === 'hybrid' }" @click="selectFormat('hybrid')">현장+중계</button>
-          <button :class="{ active: formatFilter === 'unknown' }" @click="selectFormat('unknown')">미확인</button>
+          <UButton :class="{ active: formatFilter === 'onsite' }" @click="selectFormat('onsite')">현장</UButton>
+          <UButton :class="{ active: formatFilter === 'hybrid' }" @click="selectFormat('hybrid')">현장+중계</UButton>
+          <UButton :class="{ active: formatFilter === 'unknown' }" @click="selectFormat('unknown')">미확인</UButton>
         </div>
       </div>
       <label>아티스트
-        <select v-model="artistFilter">
-          <option value="">전체 아티스트</option>
-          <option v-for="artist in artistsQuery.data.value" :key="artist.id" :value="artist.id">
-            {{ artist.display_name || artist.name }}
-          </option>
-        </select>
+        <USelect v-model="artistFilter" :items="artistFilterOptions" />
       </label>
       <label>상태
-        <select v-model="statusFilter">
-          <option value="">전체 상태</option>
-          <option value="needs_review">검토 필요</option>
-          <option value="ready">준비 완료</option>
-          <option value="synced">동기화됨</option>
-          <option value="ignored">무시됨</option>
-        </select>
+        <USelect v-model="statusFilter" :items="statusOptions" />
       </label>
       <div class="view-switch">
-        <button :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">달력</button>
-        <button :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">목록</button>
+        <UButton :class="{ active: viewMode === 'calendar' }" @click="viewMode = 'calendar'">달력</UButton>
+        <UButton :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">목록</UButton>
       </div>
     </section>
 
@@ -196,9 +209,9 @@ const formatLabels: Record<EventFormat, string> = {
 
     <section v-else-if="viewMode === 'calendar'" class="panel calendar-panel">
       <div class="calendar-header">
-        <button aria-label="이전 달" @click="moveMonth(-1)">‹</button>
+        <UButton aria-label="이전 달" @click="moveMonth(-1)">‹</UButton>
         <div><p>MONTHLY LIVE CALENDAR</p><h2>{{ monthTitle }}</h2></div>
-        <button aria-label="다음 달" @click="moveMonth(1)">›</button>
+        <UButton aria-label="다음 달" @click="moveMonth(1)">›</UButton>
       </div>
       <div class="calendar-weekdays"><span v-for="day in ['월','화','수','목','금','토','일']" :key="day">{{ day }}</span></div>
       <div class="calendar-grid">
@@ -235,21 +248,21 @@ const formatLabels: Record<EventFormat, string> = {
 
     <AppModal :open="modalOpen" title="일정 등록" description="공연 자체와 티켓 접수 일정을 구분해서 저장합니다." @close="modalOpen = false">
       <form class="form-grid" @submit.prevent="submit">
-        <label>일정 종류<select v-model="form.event_type"><option value="live_event">라이브 공연</option><option value="ticket">티켓 접수</option></select></label>
-        <label v-if="form.event_type === 'live_event'">공연 형태<select v-model="form.event_format"><option value="onsite">현장 공연</option><option value="hybrid">현장 + 온라인 중계</option><option value="unknown">미확인</option></select></label>
-        <label>아티스트<select v-model="form.artist_id"><option value="">미지정</option><option v-for="artist in artistsQuery.data.value" :key="artist.id" :value="artist.id">{{ artist.display_name || artist.name }}</option></select></label>
-        <label class="form-grid__wide">제목<input v-model="form.title" required maxlength="200" placeholder="HACHI 2nd LIVE" /></label>
-        <label>공연 시작 일시<input v-model="form.starts_at" type="datetime-local" /></label>
-        <label>장소<input v-model="form.venue" /></label>
-        <label>티켓 접수 시작<input v-model="form.ticket_opens_at" type="datetime-local" /></label>
-        <label>티켓 접수 마감<input v-model="form.ticket_closes_at" type="datetime-local" /></label>
-        <label class="form-grid__wide">티켓 URL<input v-model="form.ticket_url" type="url" /></label>
-        <label class="form-grid__wide">원문 URL<input v-model="form.source_url" type="url" /></label>
-        <label>가격 정보<input v-model="form.price_text" placeholder="¥7,500" /></label>
-        <label>상태<select v-model="form.status"><option value="needs_review">검토 필요</option><option value="ready">준비 완료</option><option value="synced">동기화됨</option><option value="ignored">무시됨</option></select></label>
-        <label class="form-grid__wide">원문 메모<textarea v-model="form.raw_text" rows="3" /></label>
+        <label>일정 종류<USelect v-model="form.event_type" :items="eventTypeOptions" /></label>
+        <label v-if="form.event_type === 'live_event'">공연 형태<USelect v-model="form.event_format" :items="eventFormatOptions" /></label>
+        <label>아티스트<USelect v-model="form.artist_id" :items="artistFilterOptions.map((item) => item.value === '' ? { ...item, label: '미지정' } : item)" /></label>
+        <label class="form-grid__wide">제목<UInput v-model="form.title" required maxlength="200" placeholder="HACHI 2nd LIVE" /></label>
+        <label>공연 시작 일시<UInput v-model="form.starts_at" type="datetime-local" /></label>
+        <label>장소<UInput v-model="form.venue" /></label>
+        <label>티켓 접수 시작<UInput v-model="form.ticket_opens_at" type="datetime-local" /></label>
+        <label>티켓 접수 마감<UInput v-model="form.ticket_closes_at" type="datetime-local" /></label>
+        <label class="form-grid__wide">티켓 URL<UInput v-model="form.ticket_url" type="url" /></label>
+        <label class="form-grid__wide">원문 URL<UInput v-model="form.source_url" type="url" /></label>
+        <label>가격 정보<UInput v-model="form.price_text" placeholder="¥7,500" /></label>
+        <label>상태<USelect v-model="form.status" :items="eventStatusOptions" /></label>
+        <label class="form-grid__wide">원문 메모<UTextarea v-model="form.raw_text" rows="3" /></label>
         <p v-if="createEvent.error.value" class="form-error">{{ createEvent.error.value.message }}</p>
-        <div class="form-actions"><button type="button" class="button button--ghost" @click="modalOpen = false">취소</button><button class="button button--primary" :disabled="createEvent.isPending.value">일정 저장</button></div>
+        <div class="form-actions"><UButton type="button" class="button button--ghost" @click="modalOpen = false">취소</UButton><UButton class="button button--primary" :disabled="createEvent.isPending.value">일정 저장</UButton></div>
       </form>
     </AppModal>
   </div>
