@@ -100,6 +100,10 @@ def get_connection() -> Connection:
 def _seed_rkmusic_x_sources(conn: Connection) -> None:
     """Insert the curated RK Music X sources without duplicating user data."""
     for artist_name, x_username in RK_MUSIC_X_SOURCES:
+        # Preserve the canonical Latin artist name when older source presets
+        # contain a legacy garbled display label.
+        if x_username == "Mikage_0916":
+            artist_name = "MIKAGE"
         artist = conn.execute(
             """
             SELECT id

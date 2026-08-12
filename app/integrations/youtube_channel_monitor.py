@@ -17,6 +17,13 @@ from app.integrations.youtube_live_archive import add_youtube_live_url
 
 logger = logging.getLogger(__name__)
 CHANNEL_ID_RE = re.compile(r"^UC[\w-]{20,}$")
+VESPERBELL_ARTIST_NAME = "VESPERBELL"
+VESPERBELL_YOMI_ARTIST_NAME = "VESPERBELL YOMI"
+VESPERBELL_KASUKA_ARTIST_NAME = "VESPERBELL KASUKA"
+KMNZ_ARTIST_NAME = "KMNZ"
+KMNZ_LITA_ARTIST_NAME = "KMNZ LITA"
+KMNZ_NERO_ARTIST_NAME = "KMNZ NERO"
+KMNZ_TINA_ARTIST_NAME = "KMNZ TINA"
 
 
 def _channel_locator(channel_url: str) -> tuple[str, str]:
@@ -206,6 +213,36 @@ async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[s
     ]
 
 
+def _performer_for_singing_stream(default_artist_name: str, video_title: str) -> str:
+    """Map supported group stream-title member tags to their artist records.
+
+    VESPERBELL also uses collaboration tags such as ``#ヨミネロ``.  Any title
+    that includes a member's name belongs to that member, even when a
+    collaborator's name follows it.  Streams without either member name
+    remain attributed to the duo itself.
+    """
+    if default_artist_name.casefold() == VESPERBELL_ARTIST_NAME.casefold():
+        if "ヨミ" in video_title:
+            return VESPERBELL_YOMI_ARTIST_NAME
+        if "カスカ" in video_title:
+            return VESPERBELL_KASUKA_ARTIST_NAME
+        return VESPERBELL_ARTIST_NAME
+
+    if default_artist_name.casefold() == KMNZ_ARTIST_NAME.casefold():
+        # Check individual tags before the generic #KMNZ tag, because every
+        # member tag has that group prefix.
+        normalized_title = video_title.upper()
+        if "#KMNZLITA" in normalized_title:
+            return KMNZ_LITA_ARTIST_NAME
+        if "#KMNZNERO" in normalized_title:
+            return KMNZ_NERO_ARTIST_NAME
+        if "#KMNZTINA" in normalized_title:
+            return KMNZ_TINA_ARTIST_NAME
+        return KMNZ_ARTIST_NAME
+
+    return default_artist_name
+
+
 async def backfill_youtube_channel(
     *,
     channel_url: str,
@@ -225,8 +262,8 @@ async def backfill_youtube_channel(
             row["youtube_video_id"]
             for row in conn.execute(
                 "SELECT youtube_video_id FROM youtube_live_archives "
-                "WHERE lower(performer_name) = lower(%s)",
-                (artist_name,),
+                "WHERE youtube_video_id = ANY(%s)",
+                ([video["youtube_video_id"] for video in videos],),
             ).fetchall()
         }
     videos = [video for video in videos if video["youtube_video_id"] not in existing_ids]
@@ -236,7 +273,7 @@ async def backfill_youtube_channel(
         try:
             archive_id = await add_youtube_live_url(
                 f"https://www.youtube.com/watch?v={video['youtube_video_id']}",
-                artist_name,
+                _performer_for_singing_stream(artist_name, video["video_title"]),
                 enrich_karaoke=False,
             )
             with get_connection() as conn:
@@ -295,7 +332,7 @@ async def _collect_due_videos(monitor: dict[str, Any]) -> int:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, youtube_video_id FROM youtube_channel_videos
+            SELECT id, youtube_video_id, video_title FROM youtube_channel_videos
             WHERE monitor_id = %s AND status <> 'processed'
               AND collect_after IS NOT NULL AND collect_after <= CURRENT_TIMESTAMP
             ORDER BY collect_after, id
@@ -307,7 +344,7 @@ async def _collect_due_videos(monitor: dict[str, Any]) -> int:
         try:
             archive_id = await add_youtube_live_url(
                 f"https://www.youtube.com/watch?v={row['youtube_video_id']}",
-                monitor["artist_name"],
+                _performer_for_singing_stream(monitor["artist_name"], row["video_title"]),
             )
             with get_connection() as conn:
                 conn.execute(
