@@ -178,20 +178,26 @@ async def create_calendar_event(discord_user_id: str, event: dict[str, Any]) -> 
     return created["id"]
 
 
-async def create_calendar_events(discord_user_id: str, event: dict[str, Any]) -> dict[str, str]:
+async def create_calendar_events(
+    discord_user_id: str,
+    event: dict[str, Any],
+    *,
+    existing_event_types: set[str] | None = None,
+) -> dict[str, str]:
     """공연 날짜와 예매/응모 날짜를 별도 Calendar 일정으로 생성합니다."""
     created = {}
-    if event.get("starts_at"):
+    existing = existing_event_types or set()
+    if event.get("starts_at") and "live" not in existing:
         created["live"] = await _create_calendar_event_from_payload(
             discord_user_id,
             _to_google_event(event),
         )
-    if event.get("ticket_opens_at"):
+    if event.get("ticket_opens_at") and "ticket" not in existing:
         created["ticket"] = await _create_calendar_event_from_payload(
             discord_user_id,
             _to_ticket_google_event(event),
         )
-    if not created:
+    if not created and "notice" not in existing:
         created["notice"] = await _create_calendar_event_from_payload(
             discord_user_id,
             _to_google_event(event),

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
-import type { Artist, YouTubeLiveArchive, YouTubePerformanceSearchResult } from '@/api/types'
+import type { Artist, YouTubeLiveArchive, YouTubePerformance, YouTubePerformanceSearchResult } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
@@ -28,6 +28,8 @@ const searchModeOptions = [
 ]
 const searchText = ref('')
 const searchResults = ref<YouTubePerformanceSearchResult[]>([])
+const editingPerformanceId = ref<number | null>(null)
+const performanceDraft = ref({ song_title: '', song_title_ko: '', original_artist: '', original_artist_ko: '' })
 
 const artistsQuery = useQuery({ queryKey: ['artists'], queryFn: api.artists.list })
 const agenciesQuery = useQuery({ queryKey: ['artist-agencies'], queryFn: api.artistAgencies.list })
@@ -66,6 +68,13 @@ const searchPerformances = useMutation({
     : api.youtubePerformances.bySong(searchText.value),
   onSuccess: (rows) => { searchResults.value = rows },
 })
+const updatePerformance = useMutation({
+  mutationFn: () => api.youtubePerformances.update(editingPerformanceId.value!, performanceDraft.value),
+  onSuccess: async () => {
+    editingPerformanceId.value = null
+    await queryClient.invalidateQueries({ queryKey: ['youtube-live'] })
+  },
+})
 
 function artistNameMatches(artist: Artist, name: string): boolean {
   return [artist.name, artist.display_name].filter(Boolean).some((value) => value?.toLowerCase() === name.toLowerCase())
@@ -82,6 +91,18 @@ function openRegistration(): void {
 function openArchive(archive: YouTubeLiveArchive): void {
   selectedId.value = archive.id
   detailOpen.value = true
+}
+function pairedLabel(original: string | null, korean: string | null): string {
+  return korean ? `${original || '미상'} (${korean})` : (original || '미상')
+}
+function startPerformanceEdit(song: YouTubePerformance): void {
+  editingPerformanceId.value = song.id
+  performanceDraft.value = {
+    song_title: song.song_title,
+    song_title_ko: song.song_title_ko || '',
+    original_artist: song.original_artist || '',
+    original_artist_ko: song.original_artist_ko || '',
+  }
 }
 function displayDate(archive: YouTubeLiveArchive): string {
   const value = archive.broadcast_at || archive.published_at
@@ -198,8 +219,8 @@ function hideBrokenImage(event: Event): void {
       </form>
       <p v-if="searchPerformances.error.value" class="form-error">{{ searchPerformances.error.value.message }}</p>
       <div v-if="searchResults.length" class="performance-results">
-        <table class="data-table"><thead><tr><th>날짜</th><th>아티스트</th><th>곡 / 원곡 가수</th><th>노래방 번호</th><th>영상</th></tr></thead><tbody>
-          <tr v-for="row in searchResults" :key="row.id"><td>{{ row.performed_on }}</td><td><strong>{{ row.artist_name }}</strong></td><td><strong>{{ row.song_title }}</strong><span>{{ row.original_artist || '원곡 가수 미상' }}</span></td><td>TJ {{ row.tj_number }}<br />금영 {{ row.ky_number }}</td><td><a :href="`${row.youtube_url}&t=${row.start_seconds}s`" target="_blank" rel="noreferrer" class="text-link">{{ row.timestamp_text }}</a></td></tr>
+        <table class="data-table"><thead><tr><th>날짜</th><th>아티스트</th><th>곡 / 원곡 가수</th><th>영상</th></tr></thead><tbody>
+          <tr v-for="row in searchResults" :key="row.id"><td>{{ row.performed_on }}</td><td><strong>{{ row.artist_name }}</strong></td><td><strong>{{ pairedLabel(row.song_title, row.song_title_ko) }}</strong><span>{{ pairedLabel(row.original_artist, row.original_artist_ko) }}</span></td><td><a :href="`${row.youtube_url}&t=${row.start_seconds}s`" target="_blank" rel="noreferrer" class="text-link">{{ row.timestamp_text }}</a></td></tr>
         </tbody></table>
       </div>
       <div v-else-if="searchPerformances.isSuccess.value" class="empty-state compact"><strong>검색된 가창 기록이 없습니다</strong></div>
@@ -225,7 +246,14 @@ function hideBrokenImage(event: Event): void {
       <div v-else-if="detail.data.value" class="live-detail">
         <a :href="detail.data.value.youtube_url" target="_blank" rel="noreferrer" class="video-link"><img v-if="thumbnail(detail.data.value)" :src="thumbnail(detail.data.value)" alt="" /><span>▶ YouTube에서 열기</span></a>
         <ol v-if="detail.data.value.performances?.length" class="setlist-list">
-          <li v-for="song in detail.data.value.performances" :key="song.id"><a :href="`${detail.data.value.youtube_url}&t=${song.start_seconds}s`" target="_blank" rel="noreferrer">{{ song.timestamp_text }}</a><span><strong>{{ song.song_title }}</strong><small>{{ song.original_artist || '원곡 가수 미상' }}</small></span><span class="karaoke-numbers">TJ {{ song.tj_number }}<br />금영 {{ song.ky_number }}</span></li>
+          <li v-for="song in detail.data.value.performances" :key="song.id">
+            <a :href="`${detail.data.value.youtube_url}&t=${song.start_seconds}s`" target="_blank" rel="noreferrer">{{ song.timestamp_text }}</a>
+            <template v-if="editingPerformanceId === song.id">
+              <span class="performance-editor"><UInput v-model="performanceDraft.song_title" placeholder="곡 제목" /><UInput v-model="performanceDraft.song_title_ko" placeholder="곡 제목 (한국어)" /><UInput v-model="performanceDraft.original_artist" placeholder="원곡 가수" /><UInput v-model="performanceDraft.original_artist_ko" placeholder="원곡 가수 (한국어)" /><p v-if="updatePerformance.error.value" class="form-error">{{ updatePerformance.error.value.message }}</p></span>
+              <span class="edit-actions"><UButton class="button button--primary" :disabled="updatePerformance.isPending.value" @click="updatePerformance.mutate()">저장</UButton><UButton class="button button--ghost" @click="editingPerformanceId = null">취소</UButton></span>
+            </template>
+            <template v-else><span><strong>{{ pairedLabel(song.song_title, song.song_title_ko) }}</strong><small>{{ pairedLabel(song.original_artist, song.original_artist_ko) }}</small></span><span><UButton class="edit-button" @click="startPerformanceEdit(song)">수정</UButton></span></template>
+          </li>
         </ol>
         <div v-else class="empty-state compact"><strong>아직 저장된 셋리스트가 없습니다</strong><p>댓글 확인이 끝나면 곡 목록이 표시됩니다.</p></div>
       </div>
@@ -237,4 +265,5 @@ function hideBrokenImage(event: Event): void {
 .artist-section{margin-bottom:36px}.section-heading,.archive-heading{display:flex;align-items:end;justify-content:space-between;gap:20px}.section-heading{margin-bottom:13px}.section-heading h2,.archive-heading h2{margin:0}.artist-selector{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(145px,190px);gap:10px;overflow-x:auto;padding:3px 2px 12px}.artist-select-card{min-height:112px;padding:16px;border:1px solid var(--line);border-radius:11px;color:#8b98ad;background:var(--panel);text-align:left;cursor:pointer;transition:.2s}.artist-select-card>span{display:grid;place-items:center;width:34px;height:34px;margin-bottom:13px;border:1px solid rgba(50,214,255,.24);border-radius:9px;color:var(--cyan);background:rgba(50,214,255,.06);font:700 12px ui-monospace,monospace}.artist-select-card strong,.artist-select-card small{display:block}.artist-select-card strong{overflow:hidden;color:#d9e3ef;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.artist-select-card small{margin-top:6px;color:#56647a;font:8px ui-monospace,monospace}.artist-select-card:hover,.artist-select-card.active{transform:translateY(-2px);border-color:rgba(50,214,255,.45);background:linear-gradient(145deg,rgba(50,214,255,.1),rgba(154,124,255,.04));box-shadow:0 12px 30px rgba(0,0,0,.2)}.loading{background:linear-gradient(100deg,#101622 20%,#1a2230 40%,#101622 60%);background-size:200%;animation:shimmer 1.5s infinite}.archive-heading{margin-bottom:17px;padding-top:22px;border-top:1px solid var(--line)}.archive-heading>div>p:last-child{margin:8px 0 0;color:#6f7d92;font-size:10px}.archive-actions{display:flex;align-items:center;gap:13px}.view-toggle{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}.view-toggle button{width:38px;height:34px;border:0;border-right:1px solid var(--line);color:#657287;background:transparent;cursor:pointer}.view-toggle button:last-child{border-right:0}.view-toggle button.active{color:var(--cyan);background:rgba(50,214,255,.08)}.archive-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:15px}.archive-card,.archive-row{padding:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;color:inherit;background:var(--panel);text-align:left;cursor:pointer;transition:.22s}.archive-card:hover,.archive-row:hover{transform:translateY(-3px);border-color:rgba(50,214,255,.35);box-shadow:0 16px 36px rgba(0,0,0,.24)}.archive-cover{position:relative;aspect-ratio:16/9;display:grid;place-items:center;overflow:hidden;color:var(--cyan);background:#0d1420;font-size:25px}.archive-cover img{width:100%;height:100%;object-fit:cover;transition:transform .3s}.archive-card:hover img,.archive-row:hover img{transform:scale(1.035)}.archive-cover b{position:absolute;right:9px;bottom:9px;padding:5px 7px;border-radius:5px;color:white;background:rgba(4,7,12,.82);font:700 8px ui-monospace,monospace}.archive-meta{padding:14px}.archive-meta small,.archive-meta strong,.archive-meta span{display:block}.archive-meta small{color:#607087;font:8px ui-monospace,monospace}.archive-meta strong{display:-webkit-box;overflow:hidden;margin-top:8px;color:#dae4ef;font-size:12px;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2}.archive-meta span{margin-top:8px;color:#758399;font-size:9px}.archive-list{display:grid;gap:8px}.archive-row{display:grid;grid-template-columns:190px 1fr;align-items:center}.archive-row .archive-cover{aspect-ratio:16/9}.performance-search-panel{margin-top:28px}.performance-search-panel summary{display:flex;justify-content:space-between;cursor:pointer;list-style:none}.performance-search-panel summary b,.performance-search-panel summary small{display:block}.performance-search-panel summary b{font-size:12px}.performance-search-panel summary small{margin-top:6px;color:#657287;font-size:9px}.performance-search-panel summary em{color:var(--cyan);font:normal 9px ui-monospace,monospace}.performance-search-panel[open] summary{margin-bottom:20px}.performance-search{display:grid;grid-template-columns:150px 1fr auto;gap:10px}.performance-results{overflow:auto;margin-top:16px}.performance-results td span{display:block;opacity:.65;margin-top:4px}.floating-register{position:fixed;right:30px;bottom:28px;z-index:40;display:flex;align-items:center;gap:9px;padding:13px 17px;border:1px solid rgba(50,214,255,.55);border-radius:999px;color:#061219;background:linear-gradient(135deg,#5ce0ff,#25bfe9);box-shadow:0 15px 40px rgba(25,190,230,.25);font-size:11px;font-weight:800;cursor:pointer}.floating-register span{font-size:18px;line-height:1}.video-link{position:relative;display:block;overflow:hidden;margin-bottom:18px;border-radius:9px;background:#0a1019}.video-link img{display:block;width:100%;max-height:270px;object-fit:cover;opacity:.75}.video-link>span{position:absolute;inset:auto 14px 13px;color:white;font-size:10px;font-weight:800}.setlist-list{list-style:none;padding:0;margin:0;display:grid}.setlist-list li{display:grid;grid-template-columns:5rem 1fr auto;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--line)}.setlist-list a{color:var(--cyan)}.setlist-list small{display:block;margin-top:4px;color:#68768b}.karaoke-numbers{line-height:1.6;white-space:nowrap}.empty-state.compact{min-height:120px}@media(max-width:800px){.archive-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.archive-row{grid-template-columns:120px 1fr}.performance-search{grid-template-columns:1fr}.floating-register{right:18px;bottom:18px}.setlist-list li{grid-template-columns:4rem 1fr}.karaoke-numbers{display:none}}@media(max-width:520px){.archive-grid{grid-template-columns:1fr}.artist-selector{grid-auto-columns:135px}}
 .artist-select-card>.artist-image{position:relative;width:52px;height:52px;overflow:hidden;border-radius:50%}.artist-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.artist-image b{font:700 12px ui-monospace,monospace}.avatar-credit{display:block;margin-top:2px;color:#48566c;font-size:8px;text-align:right}
 .artist-selector--grid{grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));overflow:visible;padding-bottom:0}.artist-selector--grid .artist-select-card{min-height:190px}.artist-selector--grid .artist-select-card>.artist-image{width:82px;height:82px}.youtube-agency-filter{margin-top:0}.youtube-artist-hero{display:grid;grid-template-columns:130px minmax(0,1fr) auto;align-items:end;gap:22px;margin-bottom:26px;padding:20px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(135deg,rgba(50,214,255,.08),rgba(255,255,255,.015))}.youtube-artist-hero>.artist-image{position:relative;display:grid;place-items:center;width:130px;height:130px;overflow:hidden;border-radius:12px;color:var(--cyan);background:rgba(50,214,255,.08);font-size:32px}.youtube-artist-hero h1{margin:5px 0 8px;font-size:28px}.youtube-artist-hero div>span{color:#718096;font:700 9px ui-monospace,monospace}@media(max-width:700px){.artist-selector--grid{grid-template-columns:repeat(2,minmax(0,1fr))}.youtube-artist-hero{grid-template-columns:88px 1fr;align-items:center}.youtube-artist-hero>.artist-image{width:88px;height:88px}.youtube-artist-hero>.button{grid-column:1/-1}}
+.performance-editor{display:grid;gap:7px}.edit-actions{display:flex;gap:6px;align-items:start}.edit-button{display:block;margin-top:7px;padding:2px 5px;border:1px solid var(--line);border-radius:4px;color:var(--cyan);background:transparent;font-size:9px;cursor:pointer}
 </style>

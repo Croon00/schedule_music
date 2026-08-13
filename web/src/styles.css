@@ -1,9 +1,23 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+@font-face {
+  font-family: "YPairing";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/2601-4@1.1/YPairingFont.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YPairing";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/2601-4@1.1/YPairingFont-Bd.woff2") format("woff2");
+  font-weight: 700 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
-  font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+  font-family: "YPairing", "Noto Sans KR", system-ui, sans-serif;
   color: #edf5ff;
   background: #080b13;
   font-synthesis: none;

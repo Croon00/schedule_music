@@ -175,7 +175,8 @@ export interface SpotifyRelationship {
 
 export interface YouTubePerformance {
   id: number; performed_on: string; start_seconds: number; timestamp_text: string; song_title: string
-  original_artist: string | null; tj_number: string; ky_number: string
+  song_title_ko: string | null; original_artist: string | null; original_artist_ko: string | null
+  tj_number: string; ky_number: string
 }
 
 export interface YouTubePerformanceSearchResult extends YouTubePerformance {

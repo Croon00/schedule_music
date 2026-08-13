@@ -45,6 +45,64 @@ def register_youtube_live(
         conn.commit()
 
 
+def _normalise_match_text(value: str | None) -> str:
+    """Compare Japanese/Roman titles without whitespace or punctuation noise."""
+    return re.sub(r"[\s\W_]", "", (value or "").casefold())
+
+
+def _apply_korean_metadata(archive_id: int) -> None:
+    """Fill Korean labels from the saved song library, without overwriting edits."""
+    with get_connection() as conn:
+        performances = conn.execute(
+            """SELECT id, song_title, original_artist, song_title_ko, original_artist_ko
+               FROM youtube_song_performances WHERE archive_id = %s""",
+            (archive_id,),
+        ).fetchall()
+        songs = conn.execute(
+            """SELECT original_title, title_ko, artist_name, artist_name_ko
+               FROM songs WHERE title_ko IS NOT NULL OR artist_name_ko IS NOT NULL"""
+        ).fetchall()
+        for performance in performances:
+            title_key = _normalise_match_text(performance["song_title"])
+            artist_key = _normalise_match_text(performance["original_artist"])
+            matches = [song for song in songs if _normalise_match_text(song["original_title"]) == title_key]
+            if artist_key:
+                artist_matches = [song for song in matches if _normalise_match_text(song["artist_name"]) == artist_key]
+                if artist_matches:
+                    matches = artist_matches
+            if len(matches) != 1:
+                continue
+            song = matches[0]
+            conn.execute(
+                """UPDATE youtube_song_performances
+                   SET song_title_ko = COALESCE(song_title_ko, %s),
+                       original_artist_ko = COALESCE(original_artist_ko, %s)
+                   WHERE id = %s""",
+                (song["title_ko"], song["artist_name_ko"], performance["id"]),
+            )
+        conn.commit()
+
+
+def update_youtube_song_performance(performance_id: int, values: dict[str, str | None]) -> dict[str, Any] | None:
+    allowed = {"song_title", "song_title_ko", "original_artist", "original_artist_ko"}
+    updates = {key: value.strip() if isinstance(value, str) and value.strip() else None for key, value in values.items() if key in allowed}
+    if not updates:
+        return None
+    if "song_title" in updates and updates["song_title"] is None:
+        raise ValueError("곡 제목은 비워둘 수 없습니다.")
+    assignments = ", ".join(f"{key} = %s" for key in updates)
+    with get_connection() as conn:
+        row = conn.execute(
+            f"""UPDATE youtube_song_performances SET {assignments}
+                WHERE id = %s
+                RETURNING id, performed_on, start_seconds, timestamp_text, song_title, song_title_ko,
+                          original_artist, original_artist_ko, tj_number, ky_number, karaoke_checked_at""",
+            (*updates.values(), performance_id),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
 async def add_youtube_live_url(
     youtube_url: str,
     artist_name: str | None = None,
@@ -267,6 +325,7 @@ def _replace_song_performances(
                 ],
             )
         conn.commit()
+    _apply_korean_metadata(archive_id)
 
 
 async def _enrich_karaoke_numbers(archive_id: int) -> None:
@@ -301,6 +360,7 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
                 ],
             )
         conn.commit()
+    _apply_korean_metadata(archive_id)
 
 
 def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) -> list[dict[str, Any]]:
@@ -333,6 +393,7 @@ def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) 
 
 def get_youtube_live_archive(archive_id: int) -> dict[str, Any] | None:
     """Return one archived live and its parsed setlist."""
+    _apply_korean_metadata(archive_id)
     with get_connection() as conn:
         archive = conn.execute(
             """
@@ -352,8 +413,8 @@ def get_youtube_live_archive(archive_id: int) -> dict[str, Any] | None:
             return None
         archive["performances"] = conn.execute(
             """
-            SELECT id, performed_on, start_seconds, timestamp_text, song_title,
-                   original_artist, tj_number, ky_number, karaoke_checked_at
+            SELECT id, performed_on, start_seconds, timestamp_text, song_title, song_title_ko,
+                   original_artist, original_artist_ko, tj_number, ky_number, karaoke_checked_at
             FROM youtube_song_performances WHERE archive_id = %s
             ORDER BY start_seconds, id
             """,
@@ -384,7 +445,9 @@ def search_youtube_song_performances(
                 p.start_seconds,
                 p.timestamp_text,
                 p.song_title,
+                p.song_title_ko,
                 p.original_artist,
+                p.original_artist_ko,
                 p.tj_number,
                 p.ky_number,
                 y.youtube_url,

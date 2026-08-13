@@ -17,6 +17,7 @@ import type {
   EventType,
   EventFormat,
   YouTubeLiveArchive,
+  YouTubePerformance,
   YouTubePerformanceSearchResult,
   LyricsSourceMode,
   WebSongCreated,
@@ -109,6 +110,10 @@ export const api = {
     bySong: (songTitle: string) => request<YouTubePerformanceSearchResult[]>(
       `/youtube-performances?song_title=${encodeURIComponent(songTitle)}`,
     ),
+    update: (id: number, payload: Partial<Pick<YouTubePerformance, 'song_title' | 'song_title_ko' | 'original_artist' | 'original_artist_ko'>>) =>
+      request<YouTubePerformance>(`/youtube-performances/${id}`, {
+        method: 'PATCH', body: JSON.stringify(payload),
+      }),
   },
   google: {
     connectUrl: (discordUserId: string) =>

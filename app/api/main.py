@@ -23,6 +23,7 @@ from app.core.models import (
     SourceCreate,
     WebSongCreate,
     WebSongCreated,
+    YouTubePerformanceUpdate,
 )
 from app.integrations.google_calendar import (
     build_google_auth_url,
@@ -36,6 +37,7 @@ from app.integrations.youtube_live_archive import (
     get_youtube_live_archive,
     list_youtube_live_archives,
     search_youtube_song_performances,
+    update_youtube_song_performance,
 )
 from app.integrations.youtube_channel_monitor import backfill_youtube_channel
 from app.integrations.spotify import (
@@ -156,6 +158,19 @@ def search_youtube_performances(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/youtube-performances/{performance_id}")
+def patch_youtube_performance(performance_id: int, payload: YouTubePerformanceUpdate) -> dict:
+    try:
+        updated = update_youtube_song_performance(
+            performance_id, payload.model_dump(exclude_unset=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="셋리스트 항목을 찾을 수 없습니다.")
+    return updated
 
 
 @app.post("/namuwiki/song-article", response_model=NamuWikiSongArticleResponse)
