@@ -186,6 +186,12 @@ export interface YouTubePerformanceSearchResult extends YouTubePerformance {
   video_title: string | null
 }
 
+export interface YouTubePerformanceFilters {
+  performers: string[]
+  original_artists: string[]
+  songs: string[]
+}
+
 export interface YouTubeLiveArchive {
   id: number; youtube_url: string; video_title: string | null; artist_name: string
   status: 'pending' | 'ready'; published_at: string | null; broadcast_at: string | null

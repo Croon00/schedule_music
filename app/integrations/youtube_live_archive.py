@@ -21,6 +21,10 @@ TIMESTAMP_LINE_RE = re.compile(
     r"(?P<title>.+?)\s*$"
 )
 MAX_ARCHIVE_ATTEMPTS = 168
+SETLIST_TITLE_PREFIX_RE = re.compile(
+    r"^(?:#\s*)?(?:제\s*)?\d+\s*(?:곡목?|曲目?)?\s*(?:[.．:：\-—)]\s*)+",
+    re.IGNORECASE,
+)
 
 
 def register_youtube_live(
@@ -58,6 +62,8 @@ def _apply_korean_metadata(archive_id: int) -> None:
                FROM youtube_song_performances WHERE archive_id = %s""",
             (archive_id,),
         ).fetchall()
+
+
         songs = conn.execute(
             """SELECT original_title, title_ko, artist_name, artist_name_ko
                FROM songs WHERE title_ko IS NOT NULL OR artist_name_ko IS NOT NULL"""
@@ -183,10 +189,13 @@ def parse_setlist_comment(text: str) -> list[dict[str, str]]:
         match = TIMESTAMP_LINE_RE.search(line)
         if not match:
             continue
+        title = SETLIST_TITLE_PREFIX_RE.sub("", match.group("title").strip()).strip()
+        if not title or re.match(r"^start(?:\b|[：:\-])", title, re.IGNORECASE):
+            continue
         entries.append(
             {
                 "timestamp": match.group("timestamp"),
-                "title": match.group("title").strip(),
+                "title": title,
             }
         )
     return entries
@@ -425,15 +434,17 @@ def get_youtube_live_archive(archive_id: int) -> dict[str, Any] | None:
 
 def search_youtube_song_performances(
     *,
-    artist_name: str | None = None,
-    song_title: str | None = None,
+    artist_names: list[str] | None = None,
+    song_titles: list[str] | None = None,
+    original_artists: list[str] | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
-    """Search every archived performance by performer or song title."""
-    artist_query = artist_name.strip() if artist_name else None
-    song_query = song_title.strip() if song_title else None
-    if not artist_query and not song_query:
-        raise ValueError("artist_name 또는 song_title 중 하나가 필요합니다.")
+    """Search archived performances using OR matching within each selected filter."""
+    performer_patterns = [f"%{value.strip()}%" for value in artist_names or [] if value.strip()]
+    song_patterns = [f"%{value.strip()}%" for value in song_titles or [] if value.strip()]
+    original_artist_patterns = [f"%{value.strip()}%" for value in original_artists or [] if value.strip()]
+    if not song_patterns:
+        raise ValueError("song_title is required.")
 
     with get_connection() as conn:
         return conn.execute(
@@ -457,15 +468,35 @@ def search_youtube_song_performances(
             JOIN youtube_live_archives y ON y.id = p.archive_id
             LEFT JOIN artist_sources s ON s.id = y.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
-            WHERE (
-                %s::text IS NULL
-                OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%'
-            ) AND (
-                %s::text IS NULL
-                OR p.song_title ILIKE '%%' || %s || '%%'
-            )
+            WHERE (%s::text[] = ARRAY[]::text[] OR COALESCE(a.name, y.performer_name, '') ILIKE ANY(%s))
+              AND (%s::text[] = ARRAY[]::text[] OR p.song_title ILIKE ANY(%s))
+              AND (%s::text[] = ARRAY[]::text[] OR COALESCE(p.original_artist, '') ILIKE ANY(%s))
             ORDER BY p.performed_on DESC, p.start_seconds, p.id
             LIMIT %s
             """,
-            (artist_query, artist_query, song_query, song_query, max(1, min(limit, 500))),
+            (performer_patterns, performer_patterns, song_patterns, song_patterns,
+             original_artist_patterns, original_artist_patterns, max(1, min(limit, 500))),
         ).fetchall()
+
+
+def list_youtube_performance_filters(limit: int = 500) -> dict[str, list[str]]:
+    """Return distinct values used by the multi-select performance search UI."""
+    with get_connection() as conn:
+        performers = conn.execute(
+            """SELECT DISTINCT COALESCE(a.name, y.performer_name) AS value
+               FROM youtube_song_performances p JOIN youtube_live_archives y ON y.id = p.archive_id
+               LEFT JOIN artist_sources s ON s.id = y.source_id LEFT JOIN artists a ON a.id = s.artist_id
+               WHERE COALESCE(a.name, y.performer_name) IS NOT NULL ORDER BY value LIMIT %s""",
+            (limit,),
+        ).fetchall()
+        original_artists = conn.execute(
+            """SELECT DISTINCT original_artist AS value FROM youtube_song_performances
+               WHERE original_artist IS NOT NULL AND original_artist <> '' ORDER BY value LIMIT %s""",
+            (limit,),
+        ).fetchall()
+        songs = conn.execute(
+            """SELECT DISTINCT song_title AS value FROM youtube_song_performances
+               WHERE song_title <> '' ORDER BY value LIMIT %s""",
+            (limit,),
+        ).fetchall()
+    return {"performers": [row["value"] for row in performers], "original_artists": [row["value"] for row in original_artists], "songs": [row["value"] for row in songs]}

@@ -1,26 +1,4 @@
 
 > schedule-music-web@0.1.0 dev
-> vite --host 127.0.0.1 --port 5173
+> vite
 
-
-  [32m[1mVITE[22m v7.3.6[39m  [2mready in [0m[1m885[22m[2m[0m ms[22m
-
-  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
-[2m오후 2:19:26[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m
-[2m오후 2:19:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/EventsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/LyricsRegistrationPage.vue, /src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
-[2m오후 2:19:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
-[2m오후 2:20:10[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
-[2m오후 2:20:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue?vue&type=style&index=0&scoped=4fb710d8&lang.css, /src/styles.css[22m
-[2m오후 2:21:07[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue, /src/pages/DashboardPage.vue, /src/pages/ArtistsPage.vue, /src/pages/EventsPage.vue, /src/pages/MusicLibraryPage.vue, /src/pages/LyricsRegistrationPage.vue, /src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
-[2m오후 4:14:10[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:14:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:14:36[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue?vue&type=style&index=0&scoped=98bc9d7b&lang.css, /src/styles.css[22m
-[2m오후 4:19:58[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:20:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:20:31[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:20:36[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:20:47[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue?vue&type=style&index=0&scoped=98bc9d7b&lang.css, /src/styles.css[22m
-[2m오후 4:23:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue, /src/styles.css[22m
-[2m오후 4:26:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/EventsPage.vue?vue&type=style&index=0&scoped=98bc9d7b&lang.css, /src/styles.css[22m
-[2m오후 4:28:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/YouTubeLivesPage.vue, /src/styles.css[22m
-[2m오후 4:53:05[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/styles.css[22m

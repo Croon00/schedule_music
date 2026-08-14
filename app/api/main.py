@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, HttpUrl
 from psycopg import Connection, errors
@@ -35,6 +35,7 @@ from app.lyrics_pipeline.service import LyricsPipelineError
 from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
+    list_youtube_performance_filters,
     list_youtube_live_archives,
     search_youtube_song_performances,
     update_youtube_song_performance,
@@ -146,18 +147,25 @@ def get_youtube_live(archive_id: int) -> dict:
 
 @app.get("/youtube-performances")
 def search_youtube_performances(
-    artist_name: str | None = None,
-    song_title: str | None = None,
+    artist_name: list[str] = Query(default=[]),
+    song_title: list[str] = Query(default=[]),
+    original_artist: list[str] = Query(default=[]),
     limit: int = 200,
 ) -> list[dict]:
     try:
         return search_youtube_song_performances(
-            artist_name=artist_name,
-            song_title=song_title,
+            artist_names=artist_name,
+            song_titles=song_title,
+            original_artists=original_artist,
             limit=limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/youtube-performance-filters")
+def get_youtube_performance_filters() -> dict[str, list[str]]:
+    return list_youtube_performance_filters()
 
 
 @app.patch("/youtube-performances/{performance_id}")
