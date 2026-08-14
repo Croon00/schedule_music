@@ -17,7 +17,9 @@ import type {
   EventType,
   EventFormat,
   YouTubeLiveArchive,
+  YouTubePerformance,
   YouTubePerformanceSearchResult,
+  YouTubePerformanceFilters,
   LyricsSourceMode,
   WebSongCreated,
 } from './types'
@@ -96,19 +98,29 @@ export const api = {
       }),
   },
   youtubeLives: {
-    list: (artistName?: string) => request<YouTubeLiveArchive[]>(`/youtube-lives${artistName ? `?artist_name=${encodeURIComponent(artistName)}` : ''}`),
+    list: (artistName?: string, limit = 100) => {
+      const params = new URLSearchParams({ limit: String(limit) })
+      if (artistName) params.set('artist_name', artistName)
+      return request<YouTubeLiveArchive[]>(`/youtube-lives?${params.toString()}`)
+    },
     get: (id: number) => request<YouTubeLiveArchive>(`/youtube-lives/${id}`),
     create: (youtubeUrl: string, artistName: string) => request<YouTubeLiveArchive>('/youtube-lives', {
       method: 'POST', body: JSON.stringify({ youtube_url: youtubeUrl, artist_name: artistName }),
     }),
   },
   youtubePerformances: {
-    byArtist: (artistName: string) => request<YouTubePerformanceSearchResult[]>(
-      `/youtube-performances?artist_name=${encodeURIComponent(artistName)}`,
-    ),
-    bySong: (songTitle: string) => request<YouTubePerformanceSearchResult[]>(
-      `/youtube-performances?song_title=${encodeURIComponent(songTitle)}`,
-    ),
+    filters: () => request<YouTubePerformanceFilters>('/youtube-performance-filters'),
+    search: (filters: { artists: string[]; songs: string[]; originalArtists: string[] }) => {
+      const params = new URLSearchParams({ limit: '500' })
+      filters.artists.forEach((value) => params.append('artist_name', value))
+      filters.songs.forEach((value) => params.append('song_title', value))
+      filters.originalArtists.forEach((value) => params.append('original_artist', value))
+      return request<YouTubePerformanceSearchResult[]>(`/youtube-performances?${params.toString()}`)
+    },
+    update: (id: number, payload: Partial<Pick<YouTubePerformance, 'song_title' | 'song_title_ko' | 'original_artist' | 'original_artist_ko'>>) =>
+      request<YouTubePerformance>(`/youtube-performances/${id}`, {
+        method: 'PATCH', body: JSON.stringify(payload),
+      }),
   },
   google: {
     connectUrl: (discordUserId: string) =>

@@ -39,6 +39,13 @@ class WebSongCreated(BaseModel):
     spotify_track_id: str | None = None
 
 
+class YouTubePerformanceUpdate(BaseModel):
+    song_title: str | None = Field(default=None, max_length=300)
+    song_title_ko: str | None = Field(default=None, max_length=300)
+    original_artist: str | None = Field(default=None, max_length=300)
+    original_artist_ko: str | None = Field(default=None, max_length=300)
+
+
 class ArtistCreate(BaseModel):
     """아티스트 생성 API에서 받는 입력값입니다."""
 

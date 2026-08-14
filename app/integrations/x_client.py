@@ -54,6 +54,31 @@ async def get_x_user_id(username: str) -> str:
     return data["data"]["id"]
 
 
+async def get_x_profile_image_url(username: str) -> str:
+    """Get a user's original-size X profile image without using a third-party avatar cache."""
+    clean_username = username.strip().lstrip("@")
+    if x_provider() == "twscrape":
+        api = await _get_twscrape_api()
+        user = await api.user_by_login(clean_username)
+        if user is None or not user.profileImageUrl:
+            raise RuntimeError(f"X user profile image was not found: {clean_username}")
+        return str(user.profileImageUrl).replace("_normal.", ".")
+
+    if not settings.x_bearer_token:
+        raise RuntimeError("X_BEARER_TOKEN is not configured.")
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"{X_API_BASE_URL}/users/by/username/{clean_username}",
+            headers=_headers(),
+            params={"user.fields": "profile_image_url"},
+        )
+        response.raise_for_status()
+        image_url = response.json().get("data", {}).get("profile_image_url")
+    if not image_url:
+        raise RuntimeError(f"X user profile image was not found: {clean_username}")
+    return str(image_url).replace("_normal.", ".")
+
+
 async def fetch_recent_posts(
     user_id: str,
     since_id: str | None = None,

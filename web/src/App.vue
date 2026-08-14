@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { useQuery } from '@tanstack/vue-query'
 import { api } from '@/api/client'
-import { useUiStore } from '@/stores/ui'
 
-const ui = useUiStore()
 const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 60_000 })
 
 const navigation = [
@@ -21,9 +19,7 @@ const navigation = [
 <template>
   <UApp>
     <div class="app-shell">
-      <UButton class="mobile-menu" aria-label="메뉴 열기" @click="ui.toggleSidebar">☰</UButton>
-      <div v-if="ui.sidebarOpen" class="sidebar-scrim" @click="ui.closeSidebar" />
-      <aside class="sidebar" :class="{ 'sidebar--open': ui.sidebarOpen }">
+      <aside class="sidebar">
         <div class="brand">
           <div class="brand__mark">S</div>
           <div>
@@ -38,7 +34,6 @@ const navigation = [
             :key="item.to"
             :to="item.to"
             class="nav-link"
-            @click="ui.closeSidebar"
           >
             <span class="nav-link__icon">{{ item.icon }}</span>
             {{ item.label }}

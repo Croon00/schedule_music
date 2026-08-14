@@ -480,7 +480,9 @@ def init_db() -> None:
                 start_seconds INTEGER NOT NULL,
                 timestamp_text TEXT NOT NULL,
                 song_title TEXT NOT NULL,
+                song_title_ko TEXT,
                 original_artist TEXT,
+                original_artist_ko TEXT,
                 tj_number TEXT NOT NULL DEFAULT '등록X',
                 ky_number TEXT NOT NULL DEFAULT '등록X',
                 karaoke_checked_at TIMESTAMPTZ,
@@ -491,6 +493,8 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS original_artist TEXT")
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS song_title_ko TEXT")
+        conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS original_artist_ko TEXT")
         conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS tj_number TEXT NOT NULL DEFAULT '등록X'")
         conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS ky_number TEXT NOT NULL DEFAULT '등록X'")
         conn.execute("ALTER TABLE youtube_song_performances ADD COLUMN IF NOT EXISTS karaoke_checked_at TIMESTAMPTZ")

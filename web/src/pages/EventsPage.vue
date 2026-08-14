@@ -14,6 +14,8 @@ const formatFilter = ref<EventFormat | ''>('onsite')
 const artistFilter = ref<number | ''>('')
 const viewMode = ref<'calendar' | 'list'>('calendar')
 const modalOpen = ref(false)
+const dayScheduleOpen = ref(false)
+const selectedCalendarDayKey = ref<string | null>(null)
 const calendarMonth = ref(startOfMonth(new Date()))
 
 const artistsQuery = useQuery({ queryKey: ['artists'], queryFn: api.artists.list })
@@ -66,6 +68,7 @@ const liveEvents = computed(() => (eventsQuery.data.value ?? []).filter(
     && event.starts_at,
 ))
 const calendarDays = computed(() => buildCalendarDays(calendarMonth.value, liveEvents.value))
+const selectedCalendarDay = computed(() => calendarDays.value.find((day) => day.key === selectedCalendarDayKey.value) ?? null)
 const monthTitle = computed(() => new Intl.DateTimeFormat('ko-KR', {
   year: 'numeric', month: 'long',
 }).format(calendarMonth.value))
@@ -87,16 +90,28 @@ function startOfMonth(date: Date): Date { return new Date(date.getFullYear(), da
 function dateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+type CalendarEvent = EventCandidate & { duplicate_count: number }
+function calendarEventKey(event: EventCandidate): string {
+  const title = event.title.normalize('NFKC').toLowerCase().replace(/[^a-z0-9가-힣ぁ-んァ-ヶ一-龯]/g, '')
+  return `${event.event_type}|${event.starts_at}|${title}`
+}
 function buildCalendarDays(month: Date, events: EventCandidate[]) {
   const first = startOfMonth(month)
   const mondayOffset = (first.getDay() + 6) % 7
   const gridStart = new Date(first.getFullYear(), first.getMonth(), 1 - mondayOffset)
-  const byDate = new Map<string, EventCandidate[]>()
+  const byDate = new Map<string, CalendarEvent[]>()
   for (const event of events) {
     const parsed = new Date(event.starts_at as string)
     if (Number.isNaN(parsed.getTime())) continue
     const key = dateKey(parsed)
-    byDate.set(key, [...(byDate.get(key) ?? []), event])
+    const dayEvents = byDate.get(key) ?? []
+    const duplicateIndex = dayEvents.findIndex((current) => calendarEventKey(current) === calendarEventKey(event))
+    if (duplicateIndex >= 0) {
+      dayEvents[duplicateIndex] = { ...dayEvents[duplicateIndex], duplicate_count: dayEvents[duplicateIndex].duplicate_count + 1 }
+    } else {
+      dayEvents.push({ ...event, duplicate_count: 1 })
+    }
+    byDate.set(key, dayEvents)
   }
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart)
@@ -109,6 +124,14 @@ function buildCalendarDays(month: Date, events: EventCandidate[]) {
 }
 function moveMonth(amount: number): void {
   calendarMonth.value = new Date(calendarMonth.value.getFullYear(), calendarMonth.value.getMonth() + amount, 1)
+}
+function openDaySchedule(key: string): void {
+  selectedCalendarDayKey.value = key
+  dayScheduleOpen.value = true
+}
+function dayScheduleTitle(): string {
+  const date = selectedCalendarDay.value?.date
+  return date ? new Intl.DateTimeFormat('ko-KR', { dateStyle: 'full' }).format(date) : '일정'
 }
 function selectType(value: EventType | ''): void {
   typeFilter.value = value
@@ -215,11 +238,12 @@ const formatLabels: Record<EventFormat, string> = {
       </div>
       <div class="calendar-weekdays"><span v-for="day in ['월','화','수','목','금','토','일']" :key="day">{{ day }}</span></div>
       <div class="calendar-grid">
-        <article v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ muted: !day.currentMonth, today: day.today }">
+        <article v-for="day in calendarDays" :key="day.key" class="calendar-day" :class="{ muted: !day.currentMonth, today: day.today }" role="button" tabindex="0" @click="openDaySchedule(day.key)" @keydown.enter="openDaySchedule(day.key)">
           <time>{{ day.date.getDate() }}</time>
-          <a v-for="event in day.events" :key="event.id" :href="event.source_url || event.ticket_url || undefined" :target="event.source_url || event.ticket_url ? '_blank' : undefined" class="calendar-event">
+          <a v-for="event in day.events" :key="event.id" :href="event.source_url || event.ticket_url || undefined" :target="event.source_url || event.ticket_url ? '_blank' : undefined" class="calendar-event" @click.stop>
             <b>{{ displayTime(event.starts_at) }}</b>
             <strong>{{ event.title }}</strong>
+            <em v-if="event.duplicate_count > 1" class="duplicate-count">같은 공지 {{ event.duplicate_count }}건</em>
             <span>{{ event.artist_id ? artistMap.get(event.artist_id) : '아티스트 미지정' }}</span>
           </a>
         </article>
@@ -227,7 +251,17 @@ const formatLabels: Record<EventFormat, string> = {
       <p v-if="typeFilter !== 'live_event' || formatFilter === 'unknown'" class="calendar-notice">달력에는 날짜가 확정된 현장·하이브리드 공연만 표시합니다. 미확인 일정은 목록에서 검토하세요.</p>
     </section>
 
-    <section v-else class="panel panel--table">
+    <AppModal :open="dayScheduleOpen" :title="dayScheduleTitle()" description="선택한 날짜의 공연 일정을 모두 확인합니다." @close="dayScheduleOpen = false">
+      <div v-if="selectedCalendarDay?.events.length" class="day-schedule-list">
+        <article v-for="event in selectedCalendarDay.events" :key="event.id" class="day-schedule-item">
+          <div><time>{{ displayTime(event.starts_at) || '시간 미정' }}</time><h3>{{ event.title }}</h3><p>{{ event.artist_id ? artistMap.get(event.artist_id) : '아티스트 미정' }}<template v-if="event.venue"> · {{ event.venue }}</template></p></div>
+          <a v-if="event.source_url || event.ticket_url" :href="event.ticket_url || event.source_url || '#'" target="_blank" rel="noreferrer" class="text-link">원문 열기</a>
+        </article>
+      </div>
+      <div v-else class="empty-state compact"><strong>등록된 일정이 없습니다</strong><p>다른 날짜를 선택해 보세요.</p></div>
+    </AppModal>
+
+    <section v-if="viewMode === 'list'" class="panel panel--table">
       <div class="toolbar"><strong>{{ typeFilter ? typeLabels[typeFilter] : '전체 일정' }}</strong><span class="count-label">{{ eventsQuery.data.value?.length || 0 }} EVENTS</span></div>
       <div v-if="eventsQuery.data.value?.length" class="event-table-wrap">
         <table class="data-table">
@@ -271,4 +305,6 @@ const formatLabels: Record<EventFormat, string> = {
 <style scoped>
 .schedule-controls{display:flex;align-items:end;gap:18px;margin-bottom:14px;padding:17px 20px}.schedule-controls label,.filter-group{display:grid;gap:7px;color:#8491a6;font-size:9px;font-weight:700}.schedule-controls select{min-width:180px}.view-switch{display:flex;margin-left:auto;border:1px solid var(--line);border-radius:7px;overflow:hidden}.view-switch button{height:38px;padding:0 15px;border:0;color:#748198;background:transparent;cursor:pointer}.view-switch button.active{color:var(--cyan);background:rgba(50,214,255,.08)}.calendar-panel{padding:0;overflow:hidden}.calendar-header{display:grid;grid-template-columns:42px 1fr 42px;align-items:center;padding:20px;text-align:center;border-bottom:1px solid var(--line)}.calendar-header button{height:38px;border:1px solid var(--line);border-radius:8px;color:#a8b5c7;background:rgba(255,255,255,.02);font-size:24px;cursor:pointer}.calendar-header p{margin:0 0 4px;color:var(--cyan);font:700 8px ui-monospace,monospace;letter-spacing:.16em}.calendar-header h2{margin:0;font-size:20px}.calendar-weekdays,.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}.calendar-weekdays span{padding:10px;border-right:1px solid var(--line);color:#637087;text-align:center;font:700 8px ui-monospace,monospace}.calendar-day{min-height:135px;padding:9px;border-top:1px solid var(--line);border-right:1px solid var(--line);background:rgba(255,255,255,.008)}.calendar-day:nth-child(7n){border-right:0}.calendar-day>time{display:grid;place-items:center;width:25px;height:25px;margin-bottom:6px;color:#8c99ac;font:700 9px ui-monospace,monospace}.calendar-day.muted{opacity:.3}.calendar-day.today>time{border-radius:50%;color:#061017;background:var(--cyan)}.calendar-event{display:block;margin-top:5px;padding:7px;border-left:2px solid var(--cyan);border-radius:3px;background:rgba(50,214,255,.075)}.calendar-event b,.calendar-event strong,.calendar-event span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.calendar-event b{color:var(--cyan);font:700 8px ui-monospace,monospace}.calendar-event strong{margin-top:3px;color:#d9e3ef;font-size:9px}.calendar-event span{margin-top:3px;color:#718096;font-size:8px}.calendar-notice{margin:0;padding:13px 20px;color:var(--amber);font-size:9px;border-top:1px solid var(--line)}.event-kind{display:inline-block!important;padding:5px 7px;border-radius:5px;color:var(--cyan);background:rgba(50,214,255,.08)}.event-kind--ticket{color:var(--amber);background:rgba(255,202,98,.08)}@media(max-width:820px){.schedule-controls{align-items:stretch;flex-direction:column}.schedule-controls select{min-width:0}.view-switch{margin-left:0}.calendar-day{min-height:90px;padding:5px}.calendar-event span,.calendar-event b{display:none}.calendar-event strong{font-size:8px}.calendar-weekdays span{padding:8px 2px}}
 .schedule-controls{flex-wrap:wrap}.format-filter{flex-basis:100%;order:2}.event-format{display:inline-block!important;padding:5px 7px;border-radius:5px;color:var(--green);background:rgba(77,230,168,.08)}.event-format--hybrid{color:#b9a8ff;background:rgba(154,124,255,.1)}.event-format--online{color:#ff91a5;background:rgba(255,116,140,.09)}.event-format--unknown{color:#8995a7;background:rgba(137,149,167,.09)}
+.duplicate-count{display:block;margin-top:3px;color:var(--amber);font:700 7px ui-monospace,monospace}
+.calendar-day{min-height:175px;cursor:pointer;transition:background .18s,box-shadow .18s}.calendar-day:hover{background:linear-gradient(145deg,rgba(50,214,255,.13),rgba(154,124,255,.06));box-shadow:inset 0 0 0 1px rgba(50,214,255,.38)}.calendar-day:hover>time{color:#061017;background:var(--cyan)}.calendar-day:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}.calendar-weekdays span{font-size:10px}.calendar-day>time{width:30px;height:30px;font-size:11px;transition:color .18s,background .18s}.calendar-event{padding:9px}.calendar-event b{font-size:10px}.calendar-event strong{font-size:12px;line-height:1.35}.calendar-event span{font-size:10px}.duplicate-count{font-size:9px}.day-schedule-list{display:grid;gap:10px}.day-schedule-item{display:flex;align-items:start;justify-content:space-between;gap:18px;padding:15px;border:1px solid var(--line);border-left:3px solid var(--cyan);border-radius:8px;background:rgba(50,214,255,.05)}.day-schedule-item time{color:var(--cyan);font:700 11px ui-monospace,monospace}.day-schedule-item h3{margin:7px 0 5px;font-size:16px}.day-schedule-item p{margin:0;color:#8d9bb0;font-size:12px}.day-schedule-item .text-link{flex:none;padding-top:3px}@media(max-width:820px){.calendar-day{min-height:115px}.calendar-event strong{font-size:10px}.calendar-event span,.calendar-event b{display:block}.day-schedule-item{display:grid;gap:10px}.day-schedule-item h3{font-size:14px}}
 </style>

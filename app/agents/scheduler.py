@@ -175,8 +175,8 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
             _normalize_ticket_open_from_post(post, extracted)
             _normalize_live_date_from_post(post, extracted)
 
-            event = _insert_event_candidate(source, post, extracted, raw_text, item_type)
-            result["events_created"] += 1
+            event, event_created = _insert_event_candidate(source, post, extracted, raw_text, item_type)
+            result["events_created"] += int(event_created)
 
         if event and event.get("event_format") not in {"online", "unknown"}:
             calendar_recipients = get_calendar_recipients_for_source(
@@ -184,7 +184,11 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
                 source_owner_id=source["discord_user_id"],
             )
             for discord_user_id in calendar_recipients:
-                provider_events = await create_calendar_events(discord_user_id, event)
+                provider_events = await create_calendar_events(
+                    discord_user_id,
+                    event,
+                    existing_event_types=_calendar_sync_types(discord_user_id, event["id"]),
+                )
                 for event_type, provider_event_id in provider_events.items():
                     _insert_calendar_sync(
                         discord_user_id,
@@ -274,9 +278,20 @@ def _insert_event_candidate(
     extracted: dict[str, Any],
     raw_text: str,
     item_type: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     """AI가 추출한 공연/예매 정보를 일정 후보 테이블에 저장합니다."""
     with get_connection() as conn:
+        event_type = item_type if item_type in {"live_event", "ticket"} else "live_event"
+        existing = conn.execute(
+            """SELECT * FROM event_candidates
+               WHERE event_type = %s
+                 AND COALESCE(starts_at, '') = COALESCE(%s, '')
+                 AND regexp_replace(lower(title), '[^[:alnum:]]', '', 'g') = %s
+               ORDER BY id LIMIT 1""",
+            (event_type, extracted.get("starts_at"), _event_title_key(extracted["title"])),
+        ).fetchone()
+        if existing:
+            return existing, False
         cursor = conn.execute(
             """
             INSERT INTO event_candidates (
@@ -291,7 +306,7 @@ def _insert_event_candidate(
                 source["artist_id"],
                 source["discord_user_id"],
                 source["id"],
-                item_type if item_type in {"live_event", "ticket"} else "live_event",
+                event_type,
                 extracted.get("event_format", "unknown"),
                 extracted["title"],
                 extracted.get("starts_at"),
@@ -306,7 +321,22 @@ def _insert_event_candidate(
         )
         event = cursor.fetchone()
         conn.commit()
-        return event
+        return event, True
+
+
+def _event_title_key(title: str) -> str:
+    """Stable event identity across reposts with harmless punctuation differences."""
+    return re.sub(r"[\W_]", "", unicodedata.normalize("NFKC", title).casefold())
+
+
+def _calendar_sync_types(discord_user_id: str, event_candidate_id: int) -> set[str]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT event_type FROM calendar_syncs
+               WHERE discord_user_id = %s AND event_candidate_id = %s AND provider = 'google'""",
+            (discord_user_id, event_candidate_id),
+        ).fetchall()
+    return {str(row["event_type"]) for row in rows}
 
 
 def _insert_calendar_sync(
