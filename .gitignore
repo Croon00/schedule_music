@@ -1,4 +1,5 @@
 .env
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -6,6 +7,8 @@ tmp_pytest*/
 data/*.db
 data/*.db-*
 exports/
+*-local.stdout.log
+*-local.stderr.log
 web/node_modules/
 web/dist/
 web/auto-imports.d.ts

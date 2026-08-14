@@ -559,7 +559,6 @@ def _list_sources_for_user(discord_user_id: str) -> list[dict]:
             JOIN artists a ON a.id = s.artist_id
             WHERE a.discord_user_id = %s OR a.discord_user_id LIKE 'system:%%'
             ORDER BY a.name, s.source_type, s.value
-            LIMIT 50
             """,
             (discord_user_id,),
         ).fetchall()

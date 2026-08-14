@@ -89,6 +89,20 @@ VWP_X_SOURCES: tuple[tuple[str, str], ...] = (
 )
 VWP_SYSTEM_USER_ID = "system:vwp"
 
+KAMITSUBAKI_X_SOURCES: tuple[tuple[str, str], ...] = (
+    ("KAMITSUBAKI STUDIO", "kamitsubaki_jp"),
+    ("CIEL", "CIEL_VanillaSky"),
+    ("Sooda", "sooda_oda"),
+    ("ASU", "ASU_virtual"),
+    ("佳鏡院", "kakyoin_gr"),
+    ("御莉姫", "orihime_gr"),
+    ("硝子宮", "garasumiya_gr"),
+    ("美古途", "mikoto_gr"),
+    ("夕凪機", "yunagi_gr"),
+    ("氷夏至", "hinageshi_gr"),
+)
+KAMITSUBAKI_SYSTEM_USER_ID = "system:kamitsubaki"
+
 
 def get_connection() -> Connection:
     """환경변수 DATABASE_URL로 PostgreSQL 연결을 만들고 row를 dict 형태로 반환합니다."""
@@ -177,6 +191,7 @@ def _seed_artist_x_sources(
     owner_id: str,
     sources: tuple[tuple[str, str], ...],
     note: str,
+    agency: str | None = None,
 ) -> None:
     """Insert a named official-source preset without modifying user-owned artists."""
     for artist_name, x_username in sources:
@@ -191,12 +206,21 @@ def _seed_artist_x_sources(
         if artist is None:
             artist = conn.execute(
                 """
-                INSERT INTO artists (discord_user_id, name, display_name, notes)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO artists (discord_user_id, name, display_name, agency, notes)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (owner_id, artist_name, artist_name, note),
+                (owner_id, artist_name, artist_name, agency, note),
             ).fetchone()
+        elif agency:
+            conn.execute(
+                """
+                UPDATE artists
+                SET agency = %s
+                WHERE id = %s AND (agency IS NULL OR agency = '')
+                """,
+                (agency, artist["id"]),
+            )
         conn.execute(
             """
             INSERT INTO artist_sources (artist_id, source_type, label, value)
@@ -307,6 +331,19 @@ def init_db() -> None:
         conn.execute(
             "UPDATE artists SET agency = 'KAMITSUBAKI STUDIO' WHERE discord_user_id = %s",
             (VWP_SYSTEM_USER_ID,),
+        )
+        conn.execute(
+            """
+            UPDATE artists
+            SET discord_user_id = %s
+            WHERE discord_user_id IS NULL
+                AND agency = 'KAMITSUBAKI STUDIO'
+            """,
+            (KAMITSUBAKI_SYSTEM_USER_ID,),
+        )
+        conn.execute(
+            "UPDATE artists SET agency = 'KAMITSUBAKI STUDIO' WHERE discord_user_id = %s",
+            (KAMITSUBAKI_SYSTEM_USER_ID,),
         )
         conn.execute(
             """
@@ -542,6 +579,14 @@ def init_db() -> None:
             owner_id=VWP_SYSTEM_USER_ID,
             sources=VWP_X_SOURCES,
             note="Official V.W.P member X source (managed preset)",
+            agency="KAMITSUBAKI STUDIO",
+        )
+        _seed_artist_x_sources(
+            conn,
+            owner_id=KAMITSUBAKI_SYSTEM_USER_ID,
+            sources=KAMITSUBAKI_X_SOURCES,
+            note="Official KAMITSUBAKI STUDIO X source (managed preset)",
+            agency="KAMITSUBAKI STUDIO",
         )
         _seed_artist_x_sources(
             conn,
