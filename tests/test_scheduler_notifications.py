@@ -1,3 +1,6 @@
+import asyncio
+
+from app.agents import scheduler
 from app.agents.scheduler import _build_notification_message, _extract_post_urls
 
 
@@ -77,3 +80,47 @@ def test_x_status_and_media_urls_are_not_used_as_page_context() -> None:
     }
 
     assert _extract_post_urls(post) == ["https://www.youtube.com/watch?v=abc"]
+
+
+def test_x_source_posts_are_not_classified_before_notification(monkeypatch) -> None:
+    post = {
+        "id": "10",
+        "text": "ordinary post",
+        "created_at": "2026-08-17T00:00:00Z",
+        "entities": {"urls": []},
+    }
+    source = {
+        "id": 1,
+        "artist_id": 1,
+        "x_username": "artist",
+        "external_user_id": "u1",
+        "last_seen_external_id": None,
+        "artist_name": "Artist",
+        "discord_user_id": "user1",
+    }
+    notified = []
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("classification should not run for immediate notifications")
+
+    async def fake_notify(**kwargs):
+        notified.append(kwargs)
+        return {"sent": 1, "skipped": 0}
+
+    async def fake_fetch_recent_posts(*args):
+        return [post]
+
+    monkeypatch.setattr(scheduler, "fetch_recent_posts", fake_fetch_recent_posts)
+    monkeypatch.setattr(scheduler, "run_music_item_graph", fail_if_called, raising=False)
+    monkeypatch.setattr(scheduler, "_insert_source_item", lambda *args: 123)
+    monkeypatch.setattr(scheduler, "update_source_item_classification", lambda **kwargs: None)
+    monkeypatch.setattr(scheduler, "_register_youtube_live_links", lambda **kwargs: None)
+    monkeypatch.setattr(scheduler, "_notify_discord_routes", fake_notify)
+    monkeypatch.setattr(scheduler, "_update_last_seen", lambda *args: None)
+
+    result = asyncio.run(scheduler._process_x_source(source))
+
+    assert result["notifications_sent"] == 1
+    assert notified[0]["item_type"] == "notice"
+    assert notified[0]["classification_reason"] is None
+    assert notified[0]["event"] is None

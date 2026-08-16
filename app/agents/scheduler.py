@@ -12,12 +12,10 @@ from psycopg import errors
 
 from app.core.config import settings
 from app.core.db import get_connection, init_db
-from app.agents.music_graph import run_music_item_graph
 from app.integrations.google_calendar import (
     create_calendar_events,
     get_calendar_recipients_for_source,
 )
-from app.integrations.ai_extractor import infer_event_format
 from app.integrations.notifications import (
     find_notification_routes_for_item,
     update_source_item_classification,
@@ -130,80 +128,25 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
         if source_item_id is None:
             continue
 
-        page_context = await _fetch_post_page_context(post)
-        raw_text = _combine_raw_text(post["text"], page_context)
-        graph_state = await run_music_item_graph(
-            source=source,
-            post=post,
-            page_context=page_context,
-            raw_text=raw_text,
-        )
-        item_type = graph_state["item_type"]
+        item_type = "notice"
         update_source_item_classification(
             source_item_id=source_item_id,
             item_type=item_type,
-            confidence=graph_state.get("classification_confidence"),
+            confidence=None,
         )
-        result["posts_classified"] += 1
-        if item_type == "live_event":
-            _register_youtube_live_links(
-                source_item_id=source_item_id,
-                source_id=source["id"],
-                post=post,
-            )
 
-        event = None
-        extracted = graph_state.get("event_extraction")
-        detected_format = (
-            extracted.get("event_format", "unknown")
-            if extracted
-            else infer_event_format(
-                raw_text=raw_text,
-                page_context=page_context,
-                ticket_url=next(iter(_youtube_urls(post)), None),
-            )
+        _register_youtube_live_links(
+            source_item_id=source_item_id,
+            source_id=source["id"],
+            post=post,
         )
-        if (
-            item_type == "live_event"
-            and detected_format == "online"
-        ):
-            # Keep source_items for deduplication and the dedicated YouTube-live archive,
-            # but do not turn online-only streams into schedule candidates or alerts.
-            result["notifications_skipped"] += 1
-            continue
-        if extracted:
-            _normalize_ticket_open_from_post(post, extracted)
-            _normalize_live_date_from_post(post, extracted)
-
-            event, event_created = _insert_event_candidate(source, post, extracted, raw_text, item_type)
-            result["events_created"] += int(event_created)
-
-        if event and event.get("event_format") not in {"online", "unknown"}:
-            calendar_recipients = get_calendar_recipients_for_source(
-                source_id=source["id"],
-                source_owner_id=source["discord_user_id"],
-            )
-            for discord_user_id in calendar_recipients:
-                provider_events = await create_calendar_events(
-                    discord_user_id,
-                    event,
-                    existing_event_types=_calendar_sync_types(discord_user_id, event["id"]),
-                )
-                for event_type, provider_event_id in provider_events.items():
-                    _insert_calendar_sync(
-                        discord_user_id,
-                        event["id"],
-                        provider_event_id,
-                        event_type,
-                    )
-                    result["calendar_events_created"] += 1
 
         notification_result = await _notify_discord_routes(
             source=source,
             post=post,
             item_type=item_type,
-            classification_reason=graph_state.get("classification_reason"),
-            event=event,
+            classification_reason=None,
+            event=None,
         )
         result["notifications_sent"] += notification_result["sent"]
         result["notifications_skipped"] += notification_result["skipped"]
