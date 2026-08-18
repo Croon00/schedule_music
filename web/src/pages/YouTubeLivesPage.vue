@@ -23,6 +23,8 @@ const statsSort = ref<'asc' | 'desc'>('asc')
 const registrationOpen = ref(false)
 const detailOpen = ref(false)
 const selectedId = ref<number | null>(null)
+const playerStartSeconds = ref(0)
+const playerNonce = ref(0)
 const youtubeUrl = ref('')
 const artistName = ref('')
 const searchMode = ref<'artist' | 'song'>('song')
@@ -128,6 +130,8 @@ function openRegistration(): void {
 }
 function openArchive(archive: YouTubeLiveArchive): void {
   selectedId.value = archive.id
+  playerStartSeconds.value = 0
+  playerNonce.value += 1
   detailOpen.value = true
 }
 function addSearchFilter(target: 'artist' | 'song' | 'originalArtist'): void {
@@ -179,6 +183,32 @@ function youtubeVideoId(url: string): string | null {
 function thumbnail(archive: YouTubeLiveArchive): string | undefined {
   const id = youtubeVideoId(archive.youtube_url)
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : undefined
+}
+function youtubeEmbedUrl(archive: YouTubeLiveArchive, startSeconds = 0): string | undefined {
+  const id = youtubeVideoId(archive.youtube_url)
+  if (!id) return undefined
+  const params = new URLSearchParams({ autoplay: '1', rel: '0' })
+  if (startSeconds > 0) params.set('start', String(startSeconds))
+  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?${params}`
+}
+function playPerformance(startSeconds: number): void {
+  playerStartSeconds.value = startSeconds
+  playerNonce.value += 1
+}
+function playTimestampFromLink(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null
+  const link = target?.closest<HTMLAnchorElement>('a[href]')
+  if (!link || !detail.data.value) return
+  try {
+    const url = new URL(link.href)
+    const startSeconds = Number(url.searchParams.get('t')?.replace(/s$/, ''))
+    if (Number.isFinite(startSeconds) && startSeconds >= 0) {
+      event.preventDefault()
+      playPerformance(startSeconds)
+    }
+  } catch {
+    // Keep the normal link behaviour for URLs that cannot be parsed.
+  }
 }
 function artistImage(artist: Artist): string | undefined {
   if (artist.spotify_image_url) return artist.spotify_image_url
@@ -333,8 +363,17 @@ function hideBrokenImage(event: Event): void {
     <AppModal :open="detailOpen" :title="detail.data.value?.video_title || detail.data.value?.artist_name || '셋리스트'" :description="detail.data.value ? `${displayDate(detail.data.value)} · ${detail.data.value.performances?.length || 0}곡` : '방송 정보를 불러오고 있습니다.'" @close="detailOpen = false">
       <div v-if="detail.isPending.value" class="skeleton-list"><i /><i /><i /></div>
       <div v-else-if="detail.isError.value" class="alert alert--error">셋리스트를 불러오지 못했습니다.</div>
-      <div v-else-if="detail.data.value" class="live-detail">
+      <div v-else-if="detail.data.value" class="live-detail" @click.capture="playTimestampFromLink">
         <a :href="detail.data.value.youtube_url" target="_blank" rel="noreferrer" class="video-link"><img v-if="thumbnail(detail.data.value)" :src="thumbnail(detail.data.value)" alt="" /><span>▶ YouTube에서 열기</span></a>
+        <div v-if="youtubeEmbedUrl(detail.data.value, playerStartSeconds)" class="video-player">
+          <iframe
+            :key="`${detail.data.value.id}-${playerStartSeconds}-${playerNonce}`"
+            :src="youtubeEmbedUrl(detail.data.value, playerStartSeconds)"
+            :title="detail.data.value.video_title || detail.data.value.artist_name"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+          />
+        </div>
         <ol v-if="detail.data.value.performances?.length" class="setlist-list">
           <li v-for="song in detail.data.value.performances" :key="song.id">
             <a :href="`${detail.data.value.youtube_url}&t=${song.start_seconds}s`" target="_blank" rel="noreferrer">{{ song.timestamp_text }}</a>
@@ -364,4 +403,5 @@ function hideBrokenImage(event: Event): void {
 .youtube-agency-filter{gap:10px}.youtube-agency-filter button{min-height:42px;padding:0 18px;font-size:13px}
 .youtube-top-tabs{display:flex;gap:8px;margin:0 0 14px}.youtube-top-tabs button{min-height:42px;padding:0 18px;border:1px solid var(--line);color:#8fa0b5;background:rgba(255,255,255,.02)}.youtube-top-tabs button.active{color:#061a10;border-color:#4de6a8;background:#4de6a8}.song-search{margin-top:20px}.song-search__header p:last-child{margin:8px 0 0;color:#7a879a;font-size:13px}.song-search__form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}.song-search label{display:grid;gap:8px;color:#b4c2d3;font-size:13px;font-weight:700}.filter-input{display:flex;gap:7px}.filter-input>*:first-child{flex:1}.filter-input button{min-height:40px;padding:0 12px;color:#a4f3c8;border:1px solid rgba(77,230,168,.35);background:rgba(77,230,168,.07)}.filter-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:27px}.filter-chips span{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;color:#baf5ce;background:rgba(77,230,168,.1);font-size:11px}.filter-chips button{padding:0;border:0;color:#baf5ce;background:transparent;font-size:16px;line-height:1;cursor:pointer}.song-search__submit{grid-column:1/-1;justify-self:end}@media(max-width:900px){.song-search__form{grid-template-columns:1fr}.song-search__submit{width:100%}}
 .collection-toggle{align-self:start;padding:10px 16px;color:#8eeebc;border:1px solid rgba(77,230,168,.4);border-radius:8px;background:rgba(77,230,168,.07);font-size:13px;font-weight:800}.collection-toggle:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8;box-shadow:0 0 0 3px rgba(77,230,168,.14)}.song-stats{margin-top:22px}.song-stats__header{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}.song-stats__header h2{margin:0}.song-stats__header p:last-child{margin:8px 0 0;color:#7a879a;font-size:13px}.song-stats__toolbar{display:flex;gap:10px;margin:18px 0}.song-stats__toolbar>*:first-child{flex:1}.song-sort{min-height:40px;padding:0 15px;color:#baf5ce;border:1px solid rgba(77,230,168,.35);background:rgba(77,230,168,.07);font-size:12px}.song-sort:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8}.song-stats__list{display:grid;gap:4px;padding:0;margin:0;list-style:none}.song-stats__list li{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:14px;padding:14px 10px;border-bottom:1px solid var(--line)}.song-stats__list li>span{color:#66758a;font:700 12px ui-monospace,monospace}.song-stats__list strong{overflow:hidden;color:#dce7f5;font-size:15px;text-overflow:ellipsis;white-space:nowrap}.song-stats__list b{padding:5px 9px;border-radius:999px;color:#9cf1c5;background:rgba(77,230,168,.1);font-size:12px}@media(max-width:700px){.youtube-artist-hero{grid-template-columns:88px minmax(0,1fr)}.collection-toggle{grid-column:1/-1;justify-self:stretch}.song-stats__header{align-items:start;flex-direction:column}.song-stats__toolbar{flex-direction:column}.song-sort{width:100%}}
+.video-player{aspect-ratio:16/9;overflow:hidden;margin-bottom:18px;border-radius:9px;background:#0a1019}.video-player iframe{display:block;width:100%;height:100%;border:0}
 </style>
