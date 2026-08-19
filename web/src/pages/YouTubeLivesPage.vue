@@ -83,8 +83,33 @@ const searchPerformances = useMutation({
   }),
   onSuccess: (rows) => { searchResults.value = rows },
 })
+function normalizeSongTitle(value: string): string {
+  let title = value
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+
+  // 댓글/셋리스트에서 흔히 붙는 표기를 제거한다. 실제 곡명은 표시용으로 유지한다.
+  title = title
+    .replace(/^\s*[「『【［(（]\s*/u, '')
+    .replace(/\s*[」』】］)）]\s*$/u, '')
+    .replace(/\s*[（(［\[]\s*(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*[）)］\]]\s*$/iu, '')
+    .replace(/\s*(?:[-\u2013\u2014|\uff5c/\uff0f:\uff1a]\s*|\s+)(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*$/iu, '')
+
+  return title.trim()
+}
+
+function songStatsKey(title: string): string {
+  // 공백, 전각/반각, 문장부호의 차이는 같은 곡으로 간주한다.
+  return title
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{Z}\p{Cf}]/gu, '')
+}
+
 function cleanSongTitle(value: string): string | null {
-  const title = value.trim()
+  const title = normalizeSongTitle(value)
   if (!title || /^start(?:\b|[：:\-])/i.test(title)) return null
   const withoutIndex = title.replace(/^(?:#\s*)?(?:제\s*)?\d+\s*(?:곡목?|曲目?)?\s*(?:[.．:：\-—)]\s*)+/u, '').trim()
   return withoutIndex && !/^start(?:\b|[：:\-])/i.test(withoutIndex) ? withoutIndex : null
@@ -95,9 +120,13 @@ const songStats = computed(() => {
     for (const entry of archive.setlist ?? []) {
       const title = cleanSongTitle(entry.title)
       if (!title) continue
-      const key = title.replace(/\s+/g, ' ').toLocaleLowerCase()
+      const key = songStatsKey(title)
       const song = songs.get(key)
-      if (song) song.count += 1
+      if (song) {
+        song.count += 1
+        // 같은 곡의 표기가 여러 개면, 보통 더 짧은 쪽이 주석이 덜 붙은 제목이다.
+        if (title.length < song.title.length) song.title = title
+      }
       else songs.set(key, { title, count: 1 })
     }
   }
@@ -360,11 +389,11 @@ function hideBrokenImage(event: Event): void {
       </form>
     </AppModal>
 
-    <AppModal :open="detailOpen" :title="detail.data.value?.video_title || detail.data.value?.artist_name || '셋리스트'" :description="detail.data.value ? `${displayDate(detail.data.value)} · ${detail.data.value.performances?.length || 0}곡` : '방송 정보를 불러오고 있습니다.'" @close="detailOpen = false">
+    <AppModal :open="detailOpen" content-class="modal--youtube-detail" :title="detail.data.value?.video_title || detail.data.value?.artist_name || '셋리스트'" :description="detail.data.value ? `${displayDate(detail.data.value)} · ${detail.data.value.performances?.length || 0}곡` : '방송 정보를 불러오고 있습니다.'" @close="detailOpen = false">
       <div v-if="detail.isPending.value" class="skeleton-list"><i /><i /><i /></div>
       <div v-else-if="detail.isError.value" class="alert alert--error">셋리스트를 불러오지 못했습니다.</div>
       <div v-else-if="detail.data.value" class="live-detail" @click.capture="playTimestampFromLink">
-        <a :href="detail.data.value.youtube_url" target="_blank" rel="noreferrer" class="video-link"><img v-if="thumbnail(detail.data.value)" :src="thumbnail(detail.data.value)" alt="" /><span>▶ YouTube에서 열기</span></a>
+        <a :href="detail.data.value.youtube_url" target="_blank" rel="noreferrer" class="video-link video-link--compact">▶ YouTube에서 열기</a>
         <div v-if="youtubeEmbedUrl(detail.data.value, playerStartSeconds)" class="video-player">
           <iframe
             :key="`${detail.data.value.id}-${playerStartSeconds}-${playerNonce}`"
@@ -374,7 +403,8 @@ function hideBrokenImage(event: Event): void {
             allowfullscreen
           />
         </div>
-        <ol v-if="detail.data.value.performances?.length" class="setlist-list">
+        <UScrollArea v-if="detail.data.value.performances?.length" class="setlist-scroll" shadow>
+          <ol class="setlist-list">
           <li v-for="song in detail.data.value.performances" :key="song.id">
             <a :href="`${detail.data.value.youtube_url}&t=${song.start_seconds}s`" target="_blank" rel="noreferrer">{{ song.timestamp_text }}</a>
             <template v-if="editingPerformanceId === song.id">
@@ -383,7 +413,8 @@ function hideBrokenImage(event: Event): void {
             </template>
             <template v-else><span><strong>{{ pairedLabel(song.song_title, song.song_title_ko) }}</strong><small>{{ pairedLabel(song.original_artist, song.original_artist_ko) }}</small></span><span><UButton class="edit-button" @click="startPerformanceEdit(song)">수정</UButton></span></template>
           </li>
-        </ol>
+          </ol>
+        </UScrollArea>
         <div v-else class="empty-state compact"><strong>아직 저장된 셋리스트가 없습니다</strong><p>댓글 확인이 끝나면 곡 목록이 표시됩니다.</p></div>
       </div>
     </AppModal>
@@ -399,9 +430,11 @@ function hideBrokenImage(event: Event): void {
 .performance-editor{display:grid;gap:7px}.edit-actions{display:flex;gap:6px;align-items:start}.edit-button{display:block;margin-top:7px;padding:2px 5px;border:1px solid var(--line);border-radius:4px;color:var(--cyan);background:transparent;font-size:9px;cursor:pointer}
 .floating-register{padding:10px 14px;font-size:12px;transition:color .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease}.floating-register:hover{color:#dff9ff;border-color:#6be6ff;background:#113344;box-shadow:0 0 0 3px rgba(50,214,255,.2),0 10px 26px rgba(25,190,230,.3);transform:none}
 .artist-selector--grid{grid-template-columns:repeat(4,minmax(0,1fr))}.artist-selector--grid .artist-select-card{min-height:210px;padding:20px}.artist-selector--grid .artist-select-card strong{font-size:15px}.artist-selector--grid .artist-select-card small{font-size:10px}.artist-selector--grid .artist-select-card>.artist-image{width:92px;height:92px}@media(max-width:1100px){.artist-selector--grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.artist-selector--grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.video-link--compact{width:max-content;margin:0 0 10px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;color:var(--cyan);background:rgba(50,214,255,.05);font-size:10px}.live-detail{display:grid;gap:12px}.live-detail .video-player{height:min(52vh,620px);min-height:320px;margin:0;aspect-ratio:auto}.live-detail .setlist-list{max-height:30vh;overflow-y:auto;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.015);scrollbar-gutter:stable}.live-detail .setlist-list li{padding:.9rem 0}.live-detail .setlist-list li:last-child{border-bottom:0}:global(.modal.modal--youtube-detail){width:min(1180px,calc(100vw - 32px));max-width:min(1180px,calc(100vw - 32px))}@media(max-width:700px){.live-detail .video-player{height:auto;min-height:0;aspect-ratio:16/9}.live-detail .setlist-list{max-height:34vh;padding:0 8px}}
 .archive-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.archive-meta small{font-size:11px;line-height:1.45}.archive-meta span{font-size:11px}.archive-meta strong{font-size:14px}@media(max-width:1100px){.archive-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.archive-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .youtube-agency-filter{gap:10px}.youtube-agency-filter button{min-height:42px;padding:0 18px;font-size:13px}
 .youtube-top-tabs{display:flex;gap:8px;margin:0 0 14px}.youtube-top-tabs button{min-height:42px;padding:0 18px;border:1px solid var(--line);color:#8fa0b5;background:rgba(255,255,255,.02)}.youtube-top-tabs button.active{color:#061a10;border-color:#4de6a8;background:#4de6a8}.song-search{margin-top:20px}.song-search__header p:last-child{margin:8px 0 0;color:#7a879a;font-size:13px}.song-search__form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}.song-search label{display:grid;gap:8px;color:#b4c2d3;font-size:13px;font-weight:700}.filter-input{display:flex;gap:7px}.filter-input>*:first-child{flex:1}.filter-input button{min-height:40px;padding:0 12px;color:#a4f3c8;border:1px solid rgba(77,230,168,.35);background:rgba(77,230,168,.07)}.filter-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:27px}.filter-chips span{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;color:#baf5ce;background:rgba(77,230,168,.1);font-size:11px}.filter-chips button{padding:0;border:0;color:#baf5ce;background:transparent;font-size:16px;line-height:1;cursor:pointer}.song-search__submit{grid-column:1/-1;justify-self:end}@media(max-width:900px){.song-search__form{grid-template-columns:1fr}.song-search__submit{width:100%}}
 .collection-toggle{align-self:start;padding:10px 16px;color:#8eeebc;border:1px solid rgba(77,230,168,.4);border-radius:8px;background:rgba(77,230,168,.07);font-size:13px;font-weight:800}.collection-toggle:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8;box-shadow:0 0 0 3px rgba(77,230,168,.14)}.song-stats{margin-top:22px}.song-stats__header{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}.song-stats__header h2{margin:0}.song-stats__header p:last-child{margin:8px 0 0;color:#7a879a;font-size:13px}.song-stats__toolbar{display:flex;gap:10px;margin:18px 0}.song-stats__toolbar>*:first-child{flex:1}.song-sort{min-height:40px;padding:0 15px;color:#baf5ce;border:1px solid rgba(77,230,168,.35);background:rgba(77,230,168,.07);font-size:12px}.song-sort:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8}.song-stats__list{display:grid;gap:4px;padding:0;margin:0;list-style:none}.song-stats__list li{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:14px;padding:14px 10px;border-bottom:1px solid var(--line)}.song-stats__list li>span{color:#66758a;font:700 12px ui-monospace,monospace}.song-stats__list strong{overflow:hidden;color:#dce7f5;font-size:15px;text-overflow:ellipsis;white-space:nowrap}.song-stats__list b{padding:5px 9px;border-radius:999px;color:#9cf1c5;background:rgba(77,230,168,.1);font-size:12px}@media(max-width:700px){.youtube-artist-hero{grid-template-columns:88px minmax(0,1fr)}.collection-toggle{grid-column:1/-1;justify-self:stretch}.song-stats__header{align-items:start;flex-direction:column}.song-stats__toolbar{flex-direction:column}.song-sort{width:100%}}
 .video-player{aspect-ratio:16/9;overflow:hidden;margin-bottom:18px;border-radius:9px;background:#0a1019}.video-player iframe{display:block;width:100%;height:100%;border:0}
+.live-detail .video-player{height:min(48vh,560px);min-height:320px;margin:0;aspect-ratio:auto}.live-detail .setlist-list{max-height:none;overflow:visible;padding:0 12px;border:0;border-radius:0;background:transparent}.setlist-scroll{max-height:26vh;overflow-y:auto;border:1px solid rgba(50,214,255,.2);border-radius:9px;background:linear-gradient(90deg,rgba(50,214,255,.035),rgba(255,255,255,.015));scrollbar-color:#30c7e8 rgba(50,214,255,.05);scrollbar-width:thin}.setlist-scroll::-webkit-scrollbar{width:10px}.setlist-scroll::-webkit-scrollbar-track{margin:7px 2px;border-radius:999px;background:rgba(50,214,255,.05)}.setlist-scroll::-webkit-scrollbar-thumb{border:2px solid #111927;border-radius:999px;background:linear-gradient(#6be6ff,#2baed4)}.setlist-scroll::-webkit-scrollbar-thumb:hover{background:linear-gradient(#a2f1ff,#40c8eb)}:global(.modal.modal--youtube-detail){overflow:hidden}@media(max-width:700px){.live-detail .video-player{height:auto;min-height:0;aspect-ratio:16/9}.setlist-scroll{max-height:30vh}.live-detail .setlist-list{padding:0 8px}}
 </style>
