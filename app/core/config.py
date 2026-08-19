@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     agent_run_on_start: bool = False
     database_auto_init: bool = False
     public_base_url: str | None = None
+    cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     x_provider: Literal["auto", "twscrape", "x_api"] = "auto"
     x_bearer_token: str | None = None
     twscrape_auth_token: str | None = None
@@ -74,6 +75,14 @@ class Settings(BaseSettings):
         if value == "":
             return None
         return value
+
+    @property
+    def cors_allowed_origin_list(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.cors_allowed_origins.split(",")
+            if origin.strip()
+        ]
 
 
 settings = Settings()
