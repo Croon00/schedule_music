@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "packages": {
+    "python": "3.12.8"
+  },
+  "deploy": {
+    "aptPackages": ["...", "ffmpeg"]
+  }
+}
