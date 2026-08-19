@@ -1,0 +1,14 @@
+INFO:     127.0.0.1:55461 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50721 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50721 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63333 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63334 - "GET /event-candidates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59334 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56250 - "GET /event-candidates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63335 - "GET /artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62515 - "GET /event-candidates?event_type=live_event&event_format=onsite HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "GET /spotify/artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49347 - "GET /artist-agencies HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49350 - "GET /youtube-performance-filters HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56249 - "GET /artists HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /health HTTP/1.1" 200 OK

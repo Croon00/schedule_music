@@ -13,3 +13,4 @@ web/node_modules/
 web/dist/
 web/auto-imports.d.ts
 web/components.d.ts
+api-dev.stderr.log
