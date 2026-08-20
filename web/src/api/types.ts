@@ -17,6 +17,35 @@ export interface WebSongCreated {
   needs_review: boolean
   spotify_track_id: string | null
 }
+
+export interface SongLyricsSummary {
+  song_id: number
+  spotify_track_id: string
+  youtube_url: string
+  has_lyrics: boolean
+}
+
+export interface SpotifyTrackYouTubeLinkCreate {
+  spotify_track_id: string
+  title: string
+  artist_name: string
+  album_name?: string | null
+  youtube_url: string
+}
+
+export interface SongLyricsDetail {
+  song_id: number
+  original_title: string
+  artist_name: string
+  album_name: string | null
+  youtube_url: string
+  original_lyrics: string
+  translation_ko: string
+  pronunciation_ko: string
+  lyrics_source_type: string
+  lyrics_source_url: string | null
+  needs_review: boolean
+}
 export type CandidateStatus = 'needs_review' | 'ready' | 'synced' | 'ignored'
 export type EventType = 'live_event' | 'ticket'
 export type EventFormat = 'onsite' | 'hybrid' | 'online' | 'unknown'

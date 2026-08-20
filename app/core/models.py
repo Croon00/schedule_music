@@ -39,6 +39,35 @@ class WebSongCreated(BaseModel):
     spotify_track_id: str | None = None
 
 
+class SongLyricsSummary(BaseModel):
+    song_id: int
+    spotify_track_id: str
+    youtube_url: str
+    has_lyrics: bool
+
+
+class SpotifyTrackYouTubeLinkCreate(BaseModel):
+    spotify_track_id: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=300)
+    artist_name: str = Field(min_length=1, max_length=300)
+    album_name: str | None = Field(default=None, max_length=300)
+    youtube_url: str = Field(min_length=1, max_length=500)
+
+
+class SongLyricsDetail(BaseModel):
+    song_id: int
+    original_title: str
+    artist_name: str
+    album_name: str | None = None
+    youtube_url: str
+    original_lyrics: str
+    translation_ko: str
+    pronunciation_ko: str
+    lyrics_source_type: str
+    lyrics_source_url: str | None = None
+    needs_review: bool
+
+
 class YouTubePerformanceUpdate(BaseModel):
     song_title: str | None = Field(default=None, max_length=300)
     song_title_ko: str | None = Field(default=None, max_length=300)

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
-import type { SpotifyAlbum } from '@/api/types'
+import type { SpotifyAlbum, SpotifyTrack } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -13,6 +13,8 @@ const router = useRouter()
 const queryClient = useQueryClient()
 const artistId = computed(() => Number(route.params.artistId))
 const selectedAlbumId = ref<string | null>(null)
+const selectedYouTubeTrack = ref<SpotifyTrack | null>(null)
+const youtubeUrl = ref('')
 const releaseFilter = ref<'all' | 'album' | 'single' | 'appears_on'>('all')
 
 const artistsQuery = useQuery({ queryKey: ['spotify-artists'], queryFn: api.spotify.artists })
@@ -35,6 +37,15 @@ const albumQuery = useQuery({
   queryFn: () => api.spotify.album(selectedAlbumId.value as string),
   enabled: computed(() => selectedAlbumId.value !== null),
 })
+const trackLyricsQuery = useQuery({
+  queryKey: ['spotify-track-lyrics', selectedAlbumId],
+  queryFn: () => api.songs.lyricsForSpotifyTracks(albumQuery.data.value?.tracks.map((track) => track.id) ?? []),
+  enabled: computed(() => Boolean(albumQuery.data.value?.tracks.length)),
+  staleTime: 60 * 60_000,
+})
+const lyricsByTrack = computed(() =>
+  new Map((trackLyricsQuery.data.value ?? []).map((lyrics) => [lyrics.spotify_track_id, lyrics])),
+)
 const filteredAlbums = computed(() => {
   const albums = discographyQuery.data.value ?? []
   if (releaseFilter.value === 'all') return albums
@@ -48,6 +59,14 @@ const excludeArtist = useMutation({
   onSuccess: async () => {
     await queryClient.invalidateQueries({ queryKey: ['spotify-artists'] })
     router.push('/music')
+  },
+})
+const linkYouTube = useMutation({
+  mutationFn: api.songs.linkSpotifyTrackYouTube,
+  onSuccess: async () => {
+    selectedYouTubeTrack.value = null
+    youtubeUrl.value = ''
+    await queryClient.invalidateQueries({ queryKey: ['spotify-track-lyrics', selectedAlbumId] })
   },
 })
 
@@ -64,28 +83,27 @@ function duration(milliseconds: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-const genreDescriptions: Record<string, string> = {
-  'j-pop': '일본 대중음악을 중심으로 한 팝 성향입니다.',
-  anime: '애니메이션 작품과 연관된 음악 성향입니다.',
-  vocaloid: '보컬로이드 문화와 연결된 음악 성향입니다.',
-  electronic: '신시사이저와 전자적 사운드를 중심으로 한 성향입니다.',
-  'japanese electronic': '일본 전자음악 계열의 사운드 성향입니다.',
-  rock: '밴드 사운드와 강한 리듬을 중심으로 한 성향입니다.',
-  alternative: '주류 팝과 다른 독자적 사운드를 폭넓게 묶는 태그입니다.',
-  indie: '인디 씬과 독립 레이블 중심의 음악 성향입니다.',
-  'japanese indie': '일본 인디 씬과 연결된 음악 성향입니다.',
-  pop: '대중적인 멜로디와 보컬 중심의 팝 성향입니다.',
-}
-
-function genreDescription(genre: string): string {
-  return genreDescriptions[genre.toLowerCase()] || 'Spotify가 이 아티스트에게 연결한 음악 성향 태그입니다.'
-}
-
 function confirmExclusion(): void {
   if (!artist.value) return
   if (window.confirm(`${artist.value.spotify_name || artist.value.local_name}의 Spotify 연결을 제거할까요? X 계정은 유지됩니다.`)) {
     excludeArtist.mutate(artist.value.local_artist_id)
   }
+}
+
+function openYouTubeLink(track: SpotifyTrack): void {
+  selectedYouTubeTrack.value = track
+  youtubeUrl.value = ''
+}
+
+function saveYouTubeLink(): void {
+  if (!selectedYouTubeTrack.value || !artist.value) return
+  linkYouTube.mutate({
+    spotify_track_id: selectedYouTubeTrack.value.id,
+    title: selectedYouTubeTrack.value.name,
+    artist_name: artist.value.spotify_name || artist.value.local_name,
+    album_name: albumQuery.data.value?.name,
+    youtube_url: youtubeUrl.value,
+  })
 }
 </script>
 
@@ -109,7 +127,6 @@ function confirmExclusion(): void {
           <div v-if="artistProfileQuery.data.value?.genres.length" class="artist-genre-list" aria-label="Spotify 장르 태그">
             <div v-for="genre in artistProfileQuery.data.value.genres" :key="genre" class="artist-genre">
               <strong>{{ genre }}</strong>
-              <span>{{ genreDescription(genre) }}</span>
             </div>
           </div>
           <p v-else-if="artistProfileQuery.isSuccess.value" class="artist-genre-empty">Spotify에 등록된 장르 태그가 없습니다.</p>
@@ -142,8 +159,16 @@ function confirmExclusion(): void {
       <div v-if="albumQuery.isPending.value" class="skeleton-list"><i /><i /><i /></div>
       <div v-else-if="albumQuery.data.value" class="album-detail">
         <div class="album-detail__hero"><img v-if="albumQuery.data.value.image_url" :src="albumQuery.data.value.image_url" :alt="albumQuery.data.value.name" /><strong>{{ albumQuery.data.value.total_tracks }}곡</strong></div>
-        <ol class="track-list"><li v-for="track in albumQuery.data.value.tracks" :key="track.id"><span>{{ track.track_number.toString().padStart(2, '0') }}</span><div><strong>{{ track.name }}</strong><em>{{ track.artists.join(', ') }}</em></div><b v-if="track.explicit">E</b><time>{{ duration(track.duration_ms) }}</time><a v-if="track.spotify_url" :href="track.spotify_url" target="_blank" rel="noreferrer">↗</a></li></ol>
+        <ol class="track-list"><li v-for="track in albumQuery.data.value.tracks" :key="track.id"><span>{{ track.track_number.toString().padStart(2, '0') }}</span><div><strong>{{ track.name }}</strong><em>{{ track.artists.join(', ') }}</em></div><b v-if="track.explicit">E</b><time>{{ duration(track.duration_ms) }}</time><a v-if="track.spotify_url" :href="track.spotify_url" target="_blank" rel="noreferrer" aria-label="Spotify에서 열기">↗</a><a v-if="lyricsByTrack.get(track.id)" :href="lyricsByTrack.get(track.id)?.youtube_url" target="_blank" rel="noreferrer" class="track-list__youtube" aria-label="YouTube에서 열기">↗</a><UButton v-else class="track-list__youtube-add" @click="openYouTubeLink(track)">YouTube 연결</UButton><RouterLink v-if="lyricsByTrack.get(track.id)?.has_lyrics" :to="`/lyrics/songs/${lyricsByTrack.get(track.id)?.song_id}`" class="track-list__lyrics">가사 보기</RouterLink></li></ol>
       </div>
+    </AppModal>
+
+    <AppModal :open="Boolean(selectedYouTubeTrack)" title="YouTube 영상 연결" :description="selectedYouTubeTrack ? `${selectedYouTubeTrack.name}의 공식 영상 URL을 입력하세요.` : ''" @close="selectedYouTubeTrack = null">
+      <form class="youtube-link-form" @submit.prevent="saveYouTubeLink">
+        <label>YouTube 영상 URL<UInput v-model="youtubeUrl" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
+        <p v-if="linkYouTube.error.value" class="form-error">{{ linkYouTube.error.value.message }}</p>
+        <div class="form-actions"><UButton class="button button--primary" :disabled="linkYouTube.isPending.value">{{ linkYouTube.isPending.value ? '연결 중…' : 'YouTube 연결' }}</UButton></div>
+      </form>
     </AppModal>
   </div>
 </template>

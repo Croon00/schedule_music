@@ -7,6 +7,9 @@ import type {
   EventCandidateCreate,
   NamuWikiTemplate,
   SongArticleInput,
+  SongLyricsDetail,
+  SongLyricsSummary,
+  SpotifyTrackYouTubeLinkCreate,
   Source,
   SourceCreate,
   SpotifyAlbum,
@@ -64,6 +67,14 @@ export const api = {
   songs: {
     createFromYouTube: (payload: { artist_id: number; title: string; youtube_url: string; source_mode: LyricsSourceMode; language_code: string }) =>
       request<WebSongCreated>('/songs/from-youtube', { method: 'POST', body: JSON.stringify(payload) }),
+    lyricsForSpotifyTracks: (trackIds: string[]) => {
+      const params = new URLSearchParams()
+      trackIds.forEach((trackId) => params.append('ids', trackId))
+      return request<SongLyricsSummary[]>(`/songs/lyrics/by-spotify-tracks?${params.toString()}`)
+    },
+    lyrics: (songId: number) => request<SongLyricsDetail>(`/songs/${songId}/lyrics`),
+    linkSpotifyTrackYouTube: (payload: SpotifyTrackYouTubeLinkCreate) =>
+      request<SongLyricsSummary>('/songs/spotify-track-youtube', { method: 'POST', body: JSON.stringify(payload) }),
   },
   artists: {
     list: () => request<Artist[]>('/artists'),

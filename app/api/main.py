@@ -22,6 +22,9 @@ from app.core.models import (
     EventCandidateCreate,
     Source,
     SourceCreate,
+    SongLyricsDetail,
+    SongLyricsSummary,
+    SpotifyTrackYouTubeLinkCreate,
     WebSongCreate,
     WebSongCreated,
     YouTubePerformanceUpdate,
@@ -33,6 +36,7 @@ from app.integrations.google_calendar import (
 )
 from app.lyrics_pipeline.song_service import save_song_from_youtube
 from app.lyrics_pipeline.service import LyricsPipelineError
+from app.lyrics_pipeline.youtube import extract_youtube_video_id
 from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
@@ -311,6 +315,107 @@ async def create_song_from_youtube(payload: WebSongCreate) -> dict:
         )
     except (ValueError, LyricsPipelineError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/songs/lyrics/by-spotify-tracks", response_model=list[SongLyricsSummary])
+def list_song_lyrics_by_spotify_tracks(ids: list[str] = Query(default=[])) -> list[SongLyricsSummary]:
+    """Return saved lyric records for a set of Spotify track IDs."""
+    track_ids = list(dict.fromkeys(track_id for track_id in ids if track_id.strip()))
+    if not track_ids:
+        return []
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.id AS song_id, s.spotify_track_id, s.youtube_url,
+                EXISTS (SELECT 1 FROM song_lyrics l WHERE l.song_id = s.id) AS has_lyrics
+            FROM songs s
+            WHERE s.spotify_track_id = ANY(%s)
+            ORDER BY s.updated_at DESC
+            """,
+            (track_ids,),
+        ).fetchall()
+    seen: set[str] = set()
+    results: list[SongLyricsSummary] = []
+    for row in rows:
+        track_id = row["spotify_track_id"]
+        if track_id in seen:
+            continue
+        seen.add(track_id)
+        results.append(
+            SongLyricsSummary(
+                song_id=row["song_id"],
+                spotify_track_id=track_id,
+                youtube_url=row["youtube_url"],
+                has_lyrics=row["has_lyrics"],
+            )
+        )
+    return results
+
+
+@app.post("/songs/spotify-track-youtube", response_model=SongLyricsSummary)
+def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> SongLyricsSummary:
+    """Attach a user-selected YouTube video to a Spotify track without creating lyrics yet."""
+    youtube_url = payload.youtube_url.strip()
+    try:
+        video_id = extract_youtube_video_id(youtube_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="올바른 YouTube 영상 URL을 입력해주세요.") from exc
+
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM songs WHERE spotify_track_id = %s ORDER BY updated_at DESC LIMIT 1",
+            (payload.spotify_track_id,),
+        ).fetchone()
+        if existing:
+            row = conn.execute(
+                """
+                UPDATE songs
+                SET original_title = %s, artist_name = %s, album_name = %s,
+                    youtube_url = %s, youtube_video_id = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                RETURNING id, spotify_track_id, youtube_url
+                """,
+                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, existing["id"]),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                INSERT INTO songs (
+                    discord_user_id, original_title, artist_name, album_name,
+                    youtube_url, youtube_video_id, spotify_track_id
+                ) VALUES ('web', %s, %s, %s, %s, %s, %s)
+                RETURNING id, spotify_track_id, youtube_url
+                """,
+                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, payload.spotify_track_id),
+            ).fetchone()
+        conn.commit()
+    return SongLyricsSummary(
+        song_id=row["id"],
+        spotify_track_id=row["spotify_track_id"],
+        youtube_url=row["youtube_url"],
+        has_lyrics=False,
+    )
+
+
+@app.get("/songs/{song_id}/lyrics", response_model=SongLyricsDetail)
+def get_song_lyrics(song_id: int) -> SongLyricsDetail:
+    """Return the original lyrics, Korean translation, and pronunciation for one saved song."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                s.id AS song_id, s.original_title, s.artist_name, s.album_name, s.youtube_url,
+                l.original_lyrics, l.translation_ko, l.pronunciation_ko,
+                l.lyrics_source_type, l.lyrics_source_url, l.needs_review
+            FROM songs s
+            JOIN song_lyrics l ON l.song_id = s.id
+            WHERE s.id = %s
+            """,
+            (song_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="저장된 가사를 찾을 수 없습니다.")
+    return SongLyricsDetail(**row_to_dict(row))
 
 
 @app.post("/artists", response_model=ArtistWithSources, status_code=status.HTTP_201_CREATED)
