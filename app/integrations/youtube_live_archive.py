@@ -11,6 +11,10 @@ from app.core.config import settings
 from app.core.db import get_connection
 from app.integrations.youtube_context import fetch_setlist_comment, fetch_video_metadata
 from app.integrations.karaoke_lookup import lookup_karaoke_numbers, split_song_credit
+from app.integrations.spotify_title_translation import (
+    translate_japanese_artist_names,
+    translate_japanese_titles,
+)
 from app.lyrics_pipeline.youtube import canonical_youtube_watch_url, extract_youtube_video_id
 
 
@@ -85,6 +89,83 @@ def _apply_korean_metadata(archive_id: int) -> None:
                        original_artist_ko = COALESCE(original_artist_ko, %s)
                    WHERE id = %s""",
                 (song["title_ko"], song["artist_name_ko"], performance["id"]),
+            )
+        conn.commit()
+
+
+async def _translate_korean_song_titles(archive_id: int) -> None:
+    """Fill missing Korean setlist titles once, while preserving manual edits."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, song_title
+            FROM youtube_song_performances
+            WHERE archive_id = %s AND song_title_ko IS NULL
+            ORDER BY start_seconds, id
+            """,
+            (archive_id,),
+        ).fetchall()
+    if not rows:
+        return
+    try:
+        translations = await translate_japanese_titles(
+            [(str(row["id"]), row["song_title"]) for row in rows]
+        )
+    except Exception:
+        logger.exception("Setlist title translation failed for archive #%s.", archive_id)
+        return
+    if not translations:
+        return
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE youtube_song_performances
+                SET song_title_ko = %s
+                WHERE id = %s AND song_title_ko IS NULL
+                """,
+                [
+                    (title_ko, int(performance_id))
+                    for performance_id, title_ko in translations.items()
+                ],
+            )
+        conn.commit()
+
+
+async def _translate_korean_original_artists(archive_id: int) -> None:
+    """Fill Korean original-artist labels once and keep manual labels intact."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, original_artist
+            FROM youtube_song_performances
+            WHERE archive_id = %s
+              AND original_artist IS NOT NULL
+              AND original_artist_ko IS NULL
+            ORDER BY start_seconds, id
+            """,
+            (archive_id,),
+        ).fetchall()
+    if not rows:
+        return
+    try:
+        translations = await translate_japanese_artist_names(
+            [(str(row["id"]), row["original_artist"]) for row in rows]
+        )
+    except Exception:
+        logger.exception("Setlist artist-name translation failed for archive #%s.", archive_id)
+        return
+    if not translations:
+        return
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE youtube_song_performances
+                SET original_artist_ko = %s
+                WHERE id = %s AND original_artist_ko IS NULL
+                """,
+                [(name_ko, int(performance_id)) for performance_id, name_ko in translations.items()],
             )
         conn.commit()
 
@@ -177,6 +258,7 @@ async def add_youtube_live_url(
             archive_id = row["id"]
         conn.commit()
     _replace_song_performances(archive_id, setlist)
+    await _translate_korean_song_titles(archive_id)
     if enrich_karaoke:
         await _enrich_karaoke_numbers(archive_id)
     return int(archive_id)
@@ -227,7 +309,7 @@ async def refresh_pending_youtube_lives(limit: int = 10) -> int:
             context = await fetch_setlist_comment(row["youtube_video_id"])
             comment = context.text if context else None
             setlist = parse_setlist_comment(comment or "")
-            _save_check_result(
+            await _save_check_result(
                 archive_id=row["id"],
                 comment=comment,
                 setlist=setlist,
@@ -241,7 +323,7 @@ async def refresh_pending_youtube_lives(limit: int = 10) -> int:
                 "YouTube live archive #%s comment check failed.",
                 row["id"],
             )
-            _save_check_result(
+            await _save_check_result(
                 archive_id=row["id"],
                 comment=None,
                 setlist=[],
@@ -250,7 +332,7 @@ async def refresh_pending_youtube_lives(limit: int = 10) -> int:
     return updated
 
 
-def _save_check_result(
+async def _save_check_result(
     *,
     archive_id: int,
     comment: str | None,
@@ -286,6 +368,7 @@ def _save_check_result(
         conn.commit()
     if setlist:
         _replace_song_performances(archive_id, setlist)
+        await _translate_korean_song_titles(archive_id)
 
 
 def _timestamp_to_seconds(timestamp: str) -> int:
@@ -370,6 +453,7 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
             )
         conn.commit()
     _apply_korean_metadata(archive_id)
+    await _translate_korean_original_artists(archive_id)
 
 
 def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) -> list[dict[str, Any]]:
@@ -469,13 +553,25 @@ def search_youtube_song_performances(
             LEFT JOIN artist_sources s ON s.id = y.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             WHERE (%s::text[] = ARRAY[]::text[] OR COALESCE(a.name, y.performer_name, '') ILIKE ANY(%s))
-              AND (%s::text[] = ARRAY[]::text[] OR p.song_title ILIKE ANY(%s))
-              AND (%s::text[] = ARRAY[]::text[] OR COALESCE(p.original_artist, '') ILIKE ANY(%s))
+              AND (
+                %s::text[] = ARRAY[]::text[]
+                OR p.song_title ILIKE ANY(%s)
+                OR COALESCE(p.song_title_ko, '') ILIKE ANY(%s)
+              )
+              AND (
+                %s::text[] = ARRAY[]::text[]
+                OR COALESCE(p.original_artist, '') ILIKE ANY(%s)
+                OR COALESCE(p.original_artist_ko, '') ILIKE ANY(%s)
+              )
             ORDER BY p.performed_on DESC, p.start_seconds, p.id
             LIMIT %s
             """,
-            (performer_patterns, performer_patterns, song_patterns, song_patterns,
-             original_artist_patterns, original_artist_patterns, max(1, min(limit, 500))),
+            (
+                performer_patterns, performer_patterns,
+                song_patterns, song_patterns, song_patterns,
+                original_artist_patterns, original_artist_patterns, original_artist_patterns,
+                max(1, min(limit, 500)),
+            ),
         ).fetchall()
 
 
@@ -490,13 +586,27 @@ def list_youtube_performance_filters(limit: int = 500) -> dict[str, list[str]]:
             (limit,),
         ).fetchall()
         original_artists = conn.execute(
-            """SELECT DISTINCT original_artist AS value FROM youtube_song_performances
-               WHERE original_artist IS NOT NULL AND original_artist <> '' ORDER BY value LIMIT %s""",
+            """
+            SELECT DISTINCT value FROM (
+                SELECT original_artist AS value FROM youtube_song_performances
+                UNION
+                SELECT original_artist_ko AS value FROM youtube_song_performances
+            ) names
+            WHERE value IS NOT NULL AND value <> ''
+            ORDER BY value LIMIT %s
+            """,
             (limit,),
         ).fetchall()
         songs = conn.execute(
-            """SELECT DISTINCT song_title AS value FROM youtube_song_performances
-               WHERE song_title <> '' ORDER BY value LIMIT %s""",
+            """
+            SELECT DISTINCT value FROM (
+                SELECT song_title AS value FROM youtube_song_performances
+                UNION
+                SELECT song_title_ko AS value FROM youtube_song_performances
+            ) titles
+            WHERE value IS NOT NULL AND value <> ''
+            ORDER BY value LIMIT %s
+            """,
             (limit,),
         ).fetchall()
     return {"performers": [row["value"] for row in performers], "original_artists": [row["value"] for row in original_artists], "songs": [row["value"] for row in songs]}

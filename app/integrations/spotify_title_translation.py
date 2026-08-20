@@ -88,6 +88,76 @@ async def resolve_korean_track_titles(tracks: list[tuple[str, str]]) -> dict[str
     if not missing or not settings.openai_api_key:
         return cached
 
+    translated = await translate_japanese_titles(missing)
+    _store_titles(translated, dict(missing))
+    return {**cached, **translated}
+
+
+async def translate_japanese_titles(titles: list[tuple[str, str]]) -> dict[str, str]:
+    """Translate Japanese titles without persisting them; callers own their cache."""
+    candidates = [
+        (item_id, title)
+        for item_id, title in titles
+        if JAPANESE_TITLE_PATTERN.search(title)
+    ]
+    if not candidates or not settings.openai_api_key:
+        return {}
+    translated: dict[str, str] = {}
+    # Keep structured-output responses compact and reliable for large live
+    # setlists/backfills.
+    for start in range(0, len(candidates), 25):
+        translated.update(await _translate_title_batch(candidates[start:start + 25]))
+    return translated
+
+
+async def translate_japanese_artist_names(names: list[tuple[str, str]]) -> dict[str, str]:
+    """Return Korean-readable artist names, preserving established name forms."""
+    candidates = [
+        (item_id, name)
+        for item_id, name in names
+        if JAPANESE_TITLE_PATTERN.search(name)
+    ]
+    if not candidates or not settings.openai_api_key:
+        return {}
+    translated: dict[str, str] = {}
+    for start in range(0, len(candidates), 25):
+        batch = candidates[start:start + 25]
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        response = await client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Write Japanese artist names in their common Korean spelling. "
+                        "Return one result for every input item. If an artist is unfamiliar, "
+                        "transcribe its Japanese pronunciation into Hangul. Do not translate meaning "
+                        "or add explanations, punctuation, or parentheses."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        [{"id": item_id, "title": name} for item_id, name in batch],
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            response_format={"type": "json_schema", "json_schema": TITLE_TRANSLATION_SCHEMA},
+        )
+        content = response.choices[0].message.content
+        if not content:
+            continue
+        expected = dict(batch)
+        translated.update({
+            str(item["id"]): str(item["title_ko"]).strip()
+            for item in json.loads(content).get("translations", [])
+            if str(item.get("id") or "") in expected and str(item.get("title_ko") or "").strip()
+        })
+    return translated
+
+
+async def _translate_title_batch(candidates: list[tuple[str, str]]) -> dict[str, str]:
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     response = await client.chat.completions.create(
         model=settings.openai_model,
@@ -103,7 +173,7 @@ async def resolve_korean_track_titles(tracks: list[tuple[str, str]]) -> dict[str
             {
                 "role": "user",
                 "content": json.dumps(
-                    [{"id": track_id, "title": title} for track_id, title in missing],
+                    [{"id": item_id, "title": title} for item_id, title in candidates],
                     ensure_ascii=False,
                 ),
             },
@@ -112,12 +182,11 @@ async def resolve_korean_track_titles(tracks: list[tuple[str, str]]) -> dict[str
     )
     content = response.choices[0].message.content
     if not content:
-        return cached
-    expected = dict(missing)
+        return {}
+    expected = dict(candidates)
     translated = {
         str(item["id"]): str(item["title_ko"]).strip()
         for item in json.loads(content).get("translations", [])
         if str(item.get("id") or "") in expected and str(item.get("title_ko") or "").strip()
     }
-    _store_titles(translated, expected)
-    return {**cached, **translated}
+    return translated
