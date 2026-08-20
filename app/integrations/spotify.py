@@ -77,6 +77,12 @@ class SpotifyAlbumDetail(SpotifyAlbumSummary):
     tracks: list[SpotifyTrackSummary] = Field(default_factory=list)
 
 
+class SpotifyDiscographyTrack(SpotifyTrackSummary):
+    """A Spotify track with the release name needed for YouTube matching."""
+
+    album_name: str
+
+
 class SpotifyRelationship(BaseModel):
     source_artist_id: int
     target_artist_id: int
@@ -94,6 +100,9 @@ class SpotifyRegisteredArtist(BaseModel):
     image_url: str | None = None
     spotify_url: str | None = None
     matched: bool = False
+    youtube_auto_linked: int = 0
+    youtube_auto_unmatched: int = 0
+    youtube_auto_link_enabled: bool = True
 
 
 def spotify_configured() -> bool:
@@ -226,6 +235,53 @@ async def get_album_detail(album_id: str) -> SpotifyAlbumDetail:
     summary = spotify_album_from_api_item(album)
     tracks = [spotify_track_summary_from_api_item(item) for item in track_items]
     return SpotifyAlbumDetail(**summary.model_dump(), tracks=tracks)
+
+
+async def get_artist_discography_tracks(
+    spotify_artist_id: str,
+    *,
+    include_groups: str = "album,single",
+) -> list[SpotifyDiscographyTrack]:
+    """Fetch an artist's own release tracks with one Spotify access token.
+
+    This is deliberately separate from the UI album-detail fetch: automatic
+    YouTube matching needs a one-off complete track list when an artist is
+    connected.
+    """
+    token = await _get_spotify_access_token()
+    album_items = await _spotify_get_all_pages(
+        f"/artists/{spotify_artist_id}/albums",
+        token,
+        params={"include_groups": include_groups, "market": "KR", "limit": 50},
+    )
+    albums: dict[str, SpotifyAlbumSummary] = {}
+    for item in album_items:
+        album = spotify_album_from_api_item(item)
+        albums.setdefault(album.id, album)
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def fetch_tracks(album: SpotifyAlbumSummary) -> list[SpotifyDiscographyTrack]:
+        async with semaphore:
+            items = await _spotify_get_all_pages(
+                f"/albums/{album.id}/tracks",
+                token,
+                params={"market": "KR", "limit": 50},
+            )
+        return [
+            SpotifyDiscographyTrack(
+                **spotify_track_summary_from_api_item(item).model_dump(),
+                album_name=album.name,
+            )
+            for item in items
+        ]
+
+    track_groups = await asyncio.gather(*(fetch_tracks(album) for album in albums.values()))
+    unique: dict[str, SpotifyDiscographyTrack] = {}
+    for tracks in track_groups:
+        for track in tracks:
+            unique.setdefault(track.id, track)
+    return list(unique.values())
 
 
 async def _spotify_get(

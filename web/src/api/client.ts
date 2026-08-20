@@ -171,6 +171,8 @@ export const api = {
       request<SpotifyArtistProfile>(`/spotify/artists/${artistId}/profile`),
     syncArtist: (artistId: number, spotifyArtistId: string) =>
       request<SpotifyArtist>(`/spotify/artists/${artistId}/sync?spotify_artist_id=${encodeURIComponent(spotifyArtistId)}`, { method: 'POST' }),
+    autoLinkYouTube: (artistId: number) =>
+      request<SpotifyArtist>(`/spotify/artists/${artistId}/youtube-auto-link`, { method: 'POST' }),
     excludeArtist: (artistId: number) =>
       request<void>(`/spotify/artists/${artistId}`, { method: 'DELETE' }),
     discography: (artistId: number) =>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -59,6 +60,7 @@ from app.integrations.spotify import (
     search_spotify_artist_candidates,
     spotify_configured,
 )
+from app.integrations.spotify_youtube import auto_link_spotify_artist_youtube
 from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
 from app.namuwiki.models import (
     NamuWikiSavedTemplateSongArticleRequest,
@@ -363,7 +365,14 @@ def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> Son
 
     with get_connection() as conn:
         existing = conn.execute(
-            "SELECT id FROM songs WHERE spotify_track_id = %s ORDER BY updated_at DESC LIMIT 1",
+            """
+            SELECT s.id,
+                EXISTS (SELECT 1 FROM song_lyrics l WHERE l.song_id = s.id) AS has_lyrics
+            FROM songs s
+            WHERE s.spotify_track_id = %s
+            ORDER BY s.updated_at DESC
+            LIMIT 1
+            """,
             (payload.spotify_track_id,),
         ).fetchone()
         if existing:
@@ -389,11 +398,12 @@ def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> Son
                 (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, payload.spotify_track_id),
             ).fetchone()
         conn.commit()
+    has_lyrics = bool(existing["has_lyrics"]) if existing else False
     return SongLyricsSummary(
         song_id=row["id"],
         spotify_track_id=row["spotify_track_id"],
         youtube_url=row["youtube_url"],
-        has_lyrics=False,
+        has_lyrics=has_lyrics,
     )
 
 
@@ -757,7 +767,54 @@ async def sync_spotify_artist(
             ),
         )
         conn.commit()
-    return next(artist for artist in list_spotify_artists() if artist.local_artist_id == artist_id)
+    # Spotify 연결을 확정할 때만 자동 검색한다. 신뢰도 기준을 통과하지
+    # 못한 트랙은 저장하지 않아, 화면의 수동 YouTube 연결 버튼으로 남는다.
+    try:
+        auto_links = await auto_link_spotify_artist_youtube(profile.spotify_artist_id)
+    except (SpotifyApiError, RuntimeError, httpx.HTTPError):
+        # 영상 검색 실패가 Spotify 연결 자체를 실패시키면 안 된다.
+        auto_links = None
+
+    artist = next(artist for artist in list_spotify_artists() if artist.local_artist_id == artist_id)
+    if auto_links is None:
+        return artist
+    return artist.model_copy(
+        update={
+            "youtube_auto_linked": auto_links.linked,
+            "youtube_auto_unmatched": auto_links.unmatched,
+            "youtube_auto_link_enabled": auto_links.enabled,
+        }
+    )
+
+
+@app.post("/spotify/artists/{artist_id}/youtube-auto-link", response_model=SpotifyRegisteredArtist)
+async def auto_link_existing_spotify_artist_youtube(artist_id: int) -> SpotifyRegisteredArtist:
+    """Run the automatic YouTube matcher again for an already linked artist."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT spotify_artist_id FROM artists WHERE id = %s",
+            (artist_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Artist not found.")
+    if not row["spotify_artist_id"]:
+        raise HTTPException(status_code=409, detail="Connect a Spotify artist first.")
+
+    try:
+        auto_links = await auto_link_spotify_artist_youtube(row["spotify_artist_id"])
+    except SpotifyApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except (RuntimeError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    artist = next(item for item in list_spotify_artists() if item.local_artist_id == artist_id)
+    return artist.model_copy(
+        update={
+            "youtube_auto_linked": auto_links.linked,
+            "youtube_auto_unmatched": auto_links.unmatched,
+            "youtube_auto_link_enabled": auto_links.enabled,
+        }
+    )
 
 
 @app.delete("/spotify/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)

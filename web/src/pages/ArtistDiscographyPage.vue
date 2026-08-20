@@ -61,6 +61,12 @@ const excludeArtist = useMutation({
     router.push('/music')
   },
 })
+const autoLinkYouTube = useMutation({
+  mutationFn: api.spotify.autoLinkYouTube,
+  onSuccess: async () => {
+    await queryClient.invalidateQueries({ queryKey: ['spotify-track-lyrics'] })
+  },
+})
 const linkYouTube = useMutation({
   mutationFn: api.songs.linkSpotifyTrackYouTube,
   onSuccess: async () => {
@@ -105,6 +111,11 @@ function saveYouTubeLink(): void {
     youtube_url: youtubeUrl.value,
   })
 }
+
+function runYouTubeAutoLink(): void {
+  if (!artist.value) return
+  autoLinkYouTube.mutate(artist.value.local_artist_id)
+}
 </script>
 
 <template>
@@ -130,8 +141,12 @@ function saveYouTubeLink(): void {
             </div>
           </div>
           <p v-else-if="artistProfileQuery.isSuccess.value" class="artist-genre-empty">Spotify에 등록된 장르 태그가 없습니다.</p>
+          <p v-if="autoLinkYouTube.data.value" class="youtube-auto-link-result">{{ autoLinkYouTube.data.value.youtube_auto_link_enabled === false ? 'YouTube 자동 연결에는 YOUTUBE_API_KEY 설정이 필요합니다.' : `YouTube 자동 연결: ${autoLinkYouTube.data.value.youtube_auto_linked || 0}개 연결 · ${autoLinkYouTube.data.value.youtube_auto_unmatched || 0}개는 확인 필요` }}</p>
         </div>
-        <UButton class="button button--danger" :disabled="excludeArtist.isPending.value" @click="confirmExclusion">Spotify 연결 제거</UButton>
+        <div class="artist-profile-hero__actions">
+          <UButton class="button button--ghost" :disabled="autoLinkYouTube.isPending.value" @click="runYouTubeAutoLink">{{ autoLinkYouTube.isPending.value ? 'YouTube 자동 연결 중…' : 'YouTube 자동 연결' }}</UButton>
+          <UButton class="button button--danger" :disabled="excludeArtist.isPending.value" @click="confirmExclusion">Spotify 연결 제거</UButton>
+        </div>
       </section>
 
       <section class="catalog-toolbar">

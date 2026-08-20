@@ -155,6 +155,9 @@ export interface SpotifyArtist {
   image_url: string | null
   spotify_url: string | null
   matched: boolean
+  youtube_auto_linked?: number
+  youtube_auto_unmatched?: number
+  youtube_auto_link_enabled?: boolean
 }
 
 export interface SpotifyArtistCandidate {
