@@ -16,7 +16,7 @@ const lyricsQuery = useQuery({
 
 <template>
   <div class="page song-lyrics-page">
-    <PageHeader eyebrow="LYRICS LIBRARY" :title="lyricsQuery.data.value?.original_title || '가사 불러오는 중'" :description="lyricsQuery.data.value ? `${lyricsQuery.data.value.artist_name}${lyricsQuery.data.value.album_name ? ` · ${lyricsQuery.data.value.album_name}` : ''}` : '원문 가사, 한국어 번역과 한글 발음을 불러옵니다.'">
+    <PageHeader eyebrow="LYRICS LIBRARY" :title="lyricsQuery.data.value ? `${lyricsQuery.data.value.original_title}${lyricsQuery.data.value.title_ko ? ` (${lyricsQuery.data.value.title_ko})` : ''}` : '가사 불러오는 중'" :description="lyricsQuery.data.value ? `${lyricsQuery.data.value.artist_name}${lyricsQuery.data.value.album_name ? ` · ${lyricsQuery.data.value.album_name}` : ''}` : '원문 가사, 한국어 번역과 한글 발음을 불러옵니다.'">
       <RouterLink to="/music" class="button button--ghost">Spotify 목록</RouterLink>
     </PageHeader>
 

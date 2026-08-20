@@ -304,6 +304,7 @@ input:focus, select:focus, textarea:focus { border-color: rgba(50,214,255,.55); 
 .track-list li > span { color: #526074; font: 9px ui-monospace, monospace; }
 .track-list strong, .track-list em { display: block; }
 .track-list strong { overflow: hidden; color: #cfd8e5; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.track-list strong small { color: #7f98b2; font-size: 9px; font-weight: 500; }
 .track-list em { margin-top: 4px; color: #5e6b80; font: normal 8px ui-monospace, monospace; }
 .track-list b { color: #8d99aa; font: 8px ui-monospace, monospace; }
 .track-list time { color: #68758a; font: 9px ui-monospace, monospace; }

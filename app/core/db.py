@@ -678,6 +678,18 @@ def init_db() -> None:
         conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS lyricist TEXT")
         conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS composer TEXT")
         conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS arranger TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS spotify_track_title_translations (
+                spotify_track_id TEXT PRIMARY KEY,
+                original_title TEXT NOT NULL,
+                title_ko TEXT NOT NULL,
+                model TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS review_notes TEXT")
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
         conn.execute(

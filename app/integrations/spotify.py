@@ -64,6 +64,7 @@ class SpotifyAlbumSummary(BaseModel):
 class SpotifyTrackSummary(BaseModel):
     id: str
     name: str
+    name_ko: str | None = None
     track_number: int
     disc_number: int
     duration_ms: int | None = None
@@ -234,6 +235,15 @@ async def get_album_detail(album_id: str) -> SpotifyAlbumDetail:
     )
     summary = spotify_album_from_api_item(album)
     tracks = [spotify_track_summary_from_api_item(item) for item in track_items]
+    from app.integrations.spotify_title_translation import resolve_korean_track_titles
+
+    try:
+        translations = await resolve_korean_track_titles([(track.id, track.name) for track in tracks])
+    except Exception:
+        # A title translation failure must not prevent the Spotify album itself
+        # from opening; untranslated names remain visible.
+        translations = {}
+    tracks = [track.model_copy(update={"name_ko": translations.get(track.id)}) for track in tracks]
     return SpotifyAlbumDetail(**summary.model_dump(), tracks=tracks)
 
 

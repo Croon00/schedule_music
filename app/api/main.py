@@ -459,11 +459,14 @@ def get_song_lyrics(song_id: int) -> SongLyricsDetail:
         row = conn.execute(
             """
             SELECT
-                s.id AS song_id, s.original_title, s.artist_name, s.album_name, s.youtube_url,
+                s.id AS song_id, s.original_title, t.title_ko, s.artist_name, s.album_name, s.youtube_url,
                 l.original_lyrics, l.translation_ko, l.pronunciation_ko,
                 l.lyrics_source_type, l.lyrics_source_url, l.needs_review
             FROM songs s
             JOIN song_lyrics l ON l.song_id = s.id
+            LEFT JOIN spotify_track_title_translations t
+                ON t.spotify_track_id = s.spotify_track_id
+                AND t.original_title = s.original_title
             WHERE s.id = %s
             """,
             (song_id,),

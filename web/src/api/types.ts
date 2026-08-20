@@ -45,6 +45,7 @@ export interface SpotifyTrackYouTubeLinkCreate {
 export interface SongLyricsDetail {
   song_id: number
   original_title: string
+  title_ko: string | null
   artist_name: string
   album_name: string | null
   youtube_url: string
@@ -196,6 +197,7 @@ export interface SpotifyAlbum {
 export interface SpotifyTrack {
   id: string
   name: string
+  name_ko: string | null
   track_number: number
   disc_number: number
   duration_ms: number | null

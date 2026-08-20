@@ -210,7 +210,7 @@ function runYouTubeAutoLink(): void {
         <ol class="track-list">
           <li v-for="track in albumQuery.data.value.tracks" :key="track.id">
             <span>{{ track.track_number.toString().padStart(2, '0') }}</span>
-            <div><strong>{{ track.name }}</strong><em>{{ track.artists.join(', ') }}</em></div>
+            <div><strong>{{ track.name }} <small v-if="track.name_ko">({{ track.name_ko }})</small></strong><em>{{ track.artists.join(', ') }}</em></div>
             <b v-if="track.explicit">E</b>
             <time>{{ duration(track.duration_ms) }}</time>
             <div class="track-list__actions">

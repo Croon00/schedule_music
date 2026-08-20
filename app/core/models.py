@@ -66,6 +66,7 @@ class SongCreditsUpdate(BaseModel):
 class SongLyricsDetail(BaseModel):
     song_id: int
     original_title: str
+    title_ko: str | None = None
     artist_name: str
     album_name: str | None = None
     youtube_url: str
