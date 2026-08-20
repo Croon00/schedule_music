@@ -170,6 +170,13 @@ async def _translate_korean_original_artists(archive_id: int) -> None:
         conn.commit()
 
 
+async def ensure_youtube_live_korean_labels(archive_id: int) -> None:
+    """Backfill Korean setlist labels when an older archive is opened."""
+    _apply_korean_metadata(archive_id)
+    await _translate_korean_song_titles(archive_id)
+    await _translate_korean_original_artists(archive_id)
+
+
 def update_youtube_song_performance(performance_id: int, values: dict[str, str | None]) -> dict[str, Any] | None:
     allowed = {"song_title", "song_title_ko", "original_artist", "original_artist_ko"}
     updates = {key: value.strip() if isinstance(value, str) and value.strip() else None for key, value in values.items() if key in allowed}

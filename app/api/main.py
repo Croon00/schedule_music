@@ -42,6 +42,7 @@ from app.lyrics_pipeline.youtube import extract_youtube_video_id
 from app.integrations.youtube_context import fetch_youtube_music_credits
 from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
+    ensure_youtube_live_korean_labels,
     get_youtube_live_archive,
     list_youtube_performance_filters,
     list_youtube_live_archives,
@@ -154,7 +155,10 @@ def get_youtube_lives(limit: int = 50, artist_name: str | None = None) -> list[d
 
 
 @app.get("/youtube-lives/{archive_id}")
-def get_youtube_live(archive_id: int) -> dict:
+async def get_youtube_live(archive_id: int) -> dict:
+    # Older archives predate Korean labels. Fill them on first open so the
+    # detailed setlist never stays permanently untranslated.
+    await ensure_youtube_live_korean_labels(archive_id)
     archive = get_youtube_live_archive(archive_id)
     if archive is None:
         raise HTTPException(status_code=404, detail="YouTube 라이브 기록을 찾지 못했습니다.")

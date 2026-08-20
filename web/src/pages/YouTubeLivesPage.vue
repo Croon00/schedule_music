@@ -158,6 +158,10 @@ function openRegistration(): void {
   registrationOpen.value = true
 }
 function openArchive(archive: YouTubeLiveArchive): void {
+  // Korean labels can be backfilled by the detail API for older setlists.
+  // Discard a previously opened archive's cache so reopening it always shows
+  // the newly completed title/artist labels.
+  queryClient.removeQueries({ queryKey: ['youtube-live', archive.id] })
   selectedId.value = archive.id
   playerStartSeconds.value = 0
   playerNonce.value += 1
