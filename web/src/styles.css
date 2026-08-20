@@ -24,9 +24,20 @@
   --green: #4de6a8;
   --amber: #ffca62;
   --danger: #ff748c;
+  --scroll-track: rgba(50, 214, 255, .05);
+  --scroll-thumb-start: #6be6ff;
+  --scroll-thumb-end: #2baed4;
+  --scroll-thumb-hover-start: #a2f1ff;
+  --scroll-thumb-hover-end: #40c8eb;
 }
 
 * { box-sizing: border-box; font-family: "NoonnuBasicGothic", "Noto Sans KR", system-ui, sans-serif !important; }
+/* Shared scrolling treatment: use this cyan rail/thumb for every new scroll surface. */
+* { scrollbar-color: #30c7e8 var(--scroll-track); scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { margin: 7px 2px; border-radius: 999px; background: var(--scroll-track); }
+*::-webkit-scrollbar-thumb { border: 2px solid #111927; border-radius: 999px; background: linear-gradient(var(--scroll-thumb-start), var(--scroll-thumb-end)); }
+*::-webkit-scrollbar-thumb:hover { background: linear-gradient(var(--scroll-thumb-hover-start), var(--scroll-thumb-hover-end)); }
 html { background: var(--bg); }
 body { margin: 0; min-width: 320px; min-height: 100vh; font-size: 16px; background:
   radial-gradient(circle at 75% -10%, rgba(50, 214, 255, .1), transparent 34rem),
