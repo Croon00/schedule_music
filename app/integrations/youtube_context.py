@@ -41,6 +41,13 @@ class YouTubeVideoMetadata:
     broadcast_at: datetime | None
 
 
+@dataclass(frozen=True)
+class YouTubeMusicCredits:
+    lyricist: str | None = None
+    composer: str | None = None
+    arranger: str | None = None
+
+
 def youtube_data_api_configured() -> bool:
     """YouTube Data API key가 설정되어 있는지 확인합니다."""
     return bool(settings.youtube_api_key)
@@ -71,6 +78,37 @@ async def fetch_video_description(video_id: str) -> YouTubeContextText | None:
     if not description:
         return None
     return YouTubeContextText(source="description", text=description)
+
+
+def extract_music_credits(description: str) -> YouTubeMusicCredits:
+    """Extract common Japanese/English credit labels from an official description."""
+    values: dict[str, str | None] = {"lyricist": None, "composer": None, "arranger": None}
+    labels = {
+        "lyricist": ("lyrics", "lyricist", "作詞", "words"),
+        "composer": ("music", "composer", "composition", "作曲"),
+        "arranger": ("arrangement", "arrange", "arranger", "編曲"),
+    }
+    for line in description.splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        for field, aliases in labels.items():
+            if values[field]:
+                continue
+            match = re.match(
+                rf"^\s*(?:{'|'.join(re.escape(alias) for alias in aliases)})\s*[:：]\s*(.+?)\s*$",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                value = match.group(1).strip()
+                values[field] = value[:300] if value else None
+    return YouTubeMusicCredits(**values)
+
+
+async def fetch_youtube_music_credits(video_id: str) -> YouTubeMusicCredits:
+    description = await fetch_video_description(video_id)
+    return extract_music_credits(description.text) if description else YouTubeMusicCredits()
 
 
 async def fetch_video_metadata(video_id: str) -> YouTubeVideoMetadata | None:

@@ -44,6 +44,9 @@ class SongLyricsSummary(BaseModel):
     spotify_track_id: str
     youtube_url: str
     has_lyrics: bool
+    lyricist: str | None = None
+    composer: str | None = None
+    arranger: str | None = None
 
 
 class SpotifyTrackYouTubeLinkCreate(BaseModel):
@@ -52,6 +55,12 @@ class SpotifyTrackYouTubeLinkCreate(BaseModel):
     artist_name: str = Field(min_length=1, max_length=300)
     album_name: str | None = Field(default=None, max_length=300)
     youtube_url: str = Field(min_length=1, max_length=500)
+
+
+class SongCreditsUpdate(BaseModel):
+    lyricist: str | None = Field(default=None, max_length=300)
+    composer: str | None = Field(default=None, max_length=300)
+    arranger: str | None = Field(default=None, max_length=300)
 
 
 class SongLyricsDetail(BaseModel):

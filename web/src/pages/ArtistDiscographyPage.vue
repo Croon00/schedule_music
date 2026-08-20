@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
-import type { SpotifyAlbum, SpotifyTrack } from '@/api/types'
+import type { SongLyricsSummary, SpotifyAlbum, SpotifyTrack } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusPill from '@/components/StatusPill.vue'
@@ -15,6 +15,8 @@ const artistId = computed(() => Number(route.params.artistId))
 const selectedAlbumId = ref<string | null>(null)
 const selectedYouTubeTrack = ref<SpotifyTrack | null>(null)
 const youtubeUrl = ref('')
+const selectedCredits = ref<SongLyricsSummary | null>(null)
+const creditsForm = ref({ lyricist: '', composer: '', arranger: '' })
 const releaseFilter = ref<'all' | 'album' | 'single' | 'appears_on'>('all')
 
 const artistsQuery = useQuery({ queryKey: ['spotify-artists'], queryFn: api.spotify.artists })
@@ -75,6 +77,14 @@ const linkYouTube = useMutation({
     await queryClient.invalidateQueries({ queryKey: ['spotify-track-lyrics', selectedAlbumId] })
   },
 })
+const saveCredits = useMutation({
+  mutationFn: ({ songId, payload }: { songId: number; payload: { lyricist: string | null; composer: string | null; arranger: string | null } }) =>
+    api.songs.updateCredits(songId, payload),
+  onSuccess: async () => {
+    selectedCredits.value = null
+    await queryClient.invalidateQueries({ queryKey: ['spotify-track-lyrics', selectedAlbumId] })
+  },
+})
 
 function albumKind(album: SpotifyAlbum): string {
   if (album.album_type === 'single') return album.total_tracks > 1 ? 'EP / SINGLE' : 'SINGLE'
@@ -109,6 +119,29 @@ function saveYouTubeLink(): void {
     artist_name: artist.value.spotify_name || artist.value.local_name,
     album_name: albumQuery.data.value?.name,
     youtube_url: youtubeUrl.value,
+  })
+}
+
+function openCredits(trackId: string): void {
+  const song = lyricsByTrack.value.get(trackId)
+  if (!song) return
+  selectedCredits.value = song
+  creditsForm.value = {
+    lyricist: song.lyricist || '',
+    composer: song.composer || '',
+    arranger: song.arranger || '',
+  }
+}
+
+function submitCredits(): void {
+  if (!selectedCredits.value) return
+  saveCredits.mutate({
+    songId: selectedCredits.value.song_id,
+    payload: {
+      lyricist: creditsForm.value.lyricist.trim() || null,
+      composer: creditsForm.value.composer.trim() || null,
+      arranger: creditsForm.value.arranger.trim() || null,
+    },
   })
 }
 
@@ -174,7 +207,21 @@ function runYouTubeAutoLink(): void {
       <div v-if="albumQuery.isPending.value" class="skeleton-list"><i /><i /><i /></div>
       <div v-else-if="albumQuery.data.value" class="album-detail">
         <div class="album-detail__hero"><img v-if="albumQuery.data.value.image_url" :src="albumQuery.data.value.image_url" :alt="albumQuery.data.value.name" /><strong>{{ albumQuery.data.value.total_tracks }}곡</strong></div>
-        <ol class="track-list"><li v-for="track in albumQuery.data.value.tracks" :key="track.id"><span>{{ track.track_number.toString().padStart(2, '0') }}</span><div><strong>{{ track.name }}</strong><em>{{ track.artists.join(', ') }}</em></div><b v-if="track.explicit">E</b><time>{{ duration(track.duration_ms) }}</time><a v-if="track.spotify_url" :href="track.spotify_url" target="_blank" rel="noreferrer" aria-label="Spotify에서 열기">↗</a><a v-if="lyricsByTrack.get(track.id)" :href="lyricsByTrack.get(track.id)?.youtube_url" target="_blank" rel="noreferrer" class="track-list__youtube" aria-label="YouTube에서 열기">↗</a><UButton v-else class="track-list__youtube-add" @click="openYouTubeLink(track)">YouTube 연결</UButton><RouterLink v-if="lyricsByTrack.get(track.id)?.has_lyrics" :to="`/lyrics/songs/${lyricsByTrack.get(track.id)?.song_id}`" class="track-list__lyrics">가사 보기</RouterLink></li></ol>
+        <ol class="track-list">
+          <li v-for="track in albumQuery.data.value.tracks" :key="track.id">
+            <span>{{ track.track_number.toString().padStart(2, '0') }}</span>
+            <div><strong>{{ track.name }}</strong><em>{{ track.artists.join(', ') }}</em></div>
+            <b v-if="track.explicit">E</b>
+            <time>{{ duration(track.duration_ms) }}</time>
+            <div class="track-list__actions">
+              <a v-if="track.spotify_url" :href="track.spotify_url" target="_blank" rel="noreferrer" aria-label="Spotify에서 열기">↗</a>
+              <a v-if="lyricsByTrack.get(track.id)" :href="lyricsByTrack.get(track.id)?.youtube_url" target="_blank" rel="noreferrer" class="track-list__youtube" aria-label="YouTube에서 열기">↗</a>
+              <UButton v-else class="track-list__youtube-add" @click="openYouTubeLink(track)">YouTube</UButton>
+              <RouterLink v-if="lyricsByTrack.get(track.id)?.has_lyrics" :to="`/lyrics/songs/${lyricsByTrack.get(track.id)?.song_id}`" class="track-list__lyrics">가사</RouterLink>
+              <UButton v-if="lyricsByTrack.get(track.id)" class="track-list__credits" @click="openCredits(track.id)">크레딧</UButton>
+            </div>
+          </li>
+        </ol>
       </div>
     </AppModal>
 
@@ -183,6 +230,16 @@ function runYouTubeAutoLink(): void {
         <label>YouTube 영상 URL<UInput v-model="youtubeUrl" type="url" required placeholder="https://www.youtube.com/watch?v=..." /></label>
         <p v-if="linkYouTube.error.value" class="form-error">{{ linkYouTube.error.value.message }}</p>
         <div class="form-actions"><UButton class="button button--primary" :disabled="linkYouTube.isPending.value">{{ linkYouTube.isPending.value ? '연결 중…' : 'YouTube 연결' }}</UButton></div>
+      </form>
+    </AppModal>
+
+    <AppModal :open="Boolean(selectedCredits)" title="곡 크레딧" :description="selectedCredits ? 'YouTube 설명란에서 가져온 값입니다. 없는 항목은 직접 입력할 수 있습니다.' : ''" @close="selectedCredits = null">
+      <form class="credits-form" @submit.prevent="submitCredits">
+        <label>작사<UInput v-model="creditsForm.lyricist" placeholder="정보 없음" /></label>
+        <label>작곡<UInput v-model="creditsForm.composer" placeholder="정보 없음" /></label>
+        <label>편곡<UInput v-model="creditsForm.arranger" placeholder="정보 없음" /></label>
+        <p v-if="saveCredits.error.value" class="form-error">{{ saveCredits.error.value.message }}</p>
+        <div class="form-actions"><UButton class="button button--primary" :disabled="saveCredits.isPending.value">{{ saveCredits.isPending.value ? '저장 중…' : '크레딧 저장' }}</UButton></div>
       </form>
     </AppModal>
   </div>

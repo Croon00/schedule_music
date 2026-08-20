@@ -7,6 +7,7 @@ import type {
   EventCandidateCreate,
   NamuWikiTemplate,
   SongArticleInput,
+  SongCreditsUpdate,
   SongLyricsDetail,
   SongLyricsSummary,
   SpotifyTrackYouTubeLinkCreate,
@@ -75,6 +76,8 @@ export const api = {
     lyrics: (songId: number) => request<SongLyricsDetail>(`/songs/${songId}/lyrics`),
     linkSpotifyTrackYouTube: (payload: SpotifyTrackYouTubeLinkCreate) =>
       request<SongLyricsSummary>('/songs/spotify-track-youtube', { method: 'POST', body: JSON.stringify(payload) }),
+    updateCredits: (songId: number, payload: SongCreditsUpdate) =>
+      request<SongLyricsSummary>(`/songs/${songId}/credits`, { method: 'PATCH', body: JSON.stringify(payload) }),
   },
   artists: {
     list: () => request<Artist[]>('/artists'),

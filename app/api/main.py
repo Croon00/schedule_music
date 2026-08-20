@@ -25,6 +25,7 @@ from app.core.models import (
     SourceCreate,
     SongLyricsDetail,
     SongLyricsSummary,
+    SongCreditsUpdate,
     SpotifyTrackYouTubeLinkCreate,
     WebSongCreate,
     WebSongCreated,
@@ -38,6 +39,7 @@ from app.integrations.google_calendar import (
 from app.lyrics_pipeline.song_service import save_song_from_youtube
 from app.lyrics_pipeline.service import LyricsPipelineError
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
+from app.integrations.youtube_context import fetch_youtube_music_credits
 from app.integrations.youtube_live_archive import (
     add_youtube_live_url,
     get_youtube_live_archive,
@@ -329,6 +331,7 @@ def list_song_lyrics_by_spotify_tracks(ids: list[str] = Query(default=[])) -> li
         rows = conn.execute(
             """
             SELECT s.id AS song_id, s.spotify_track_id, s.youtube_url,
+                s.lyricist, s.composer, s.arranger,
                 EXISTS (SELECT 1 FROM song_lyrics l WHERE l.song_id = s.id) AS has_lyrics
             FROM songs s
             WHERE s.spotify_track_id = ANY(%s)
@@ -349,19 +352,27 @@ def list_song_lyrics_by_spotify_tracks(ids: list[str] = Query(default=[])) -> li
                 spotify_track_id=track_id,
                 youtube_url=row["youtube_url"],
                 has_lyrics=row["has_lyrics"],
+                lyricist=row["lyricist"],
+                composer=row["composer"],
+                arranger=row["arranger"],
             )
         )
     return results
 
 
 @app.post("/songs/spotify-track-youtube", response_model=SongLyricsSummary)
-def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> SongLyricsSummary:
+async def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> SongLyricsSummary:
     """Attach a user-selected YouTube video to a Spotify track without creating lyrics yet."""
     youtube_url = payload.youtube_url.strip()
     try:
         video_id = extract_youtube_video_id(youtube_url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="올바른 YouTube 영상 URL을 입력해주세요.") from exc
+
+    try:
+        credits = await fetch_youtube_music_credits(video_id)
+    except (RuntimeError, httpx.HTTPError):
+        credits = None
 
     with get_connection() as conn:
         existing = conn.execute(
@@ -380,22 +391,28 @@ def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> Son
                 """
                 UPDATE songs
                 SET original_title = %s, artist_name = %s, album_name = %s,
-                    youtube_url = %s, youtube_video_id = %s, updated_at = CURRENT_TIMESTAMP
+                    youtube_url = %s, youtube_video_id = %s,
+                    lyricist = %s, composer = %s, arranger = %s,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
-                RETURNING id, spotify_track_id, youtube_url
+                RETURNING id, spotify_track_id, youtube_url, lyricist, composer, arranger
                 """,
-                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, existing["id"]),
+                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id,
+                 credits.lyricist if credits else None, credits.composer if credits else None,
+                 credits.arranger if credits else None, existing["id"]),
             ).fetchone()
         else:
             row = conn.execute(
                 """
                 INSERT INTO songs (
                     discord_user_id, original_title, artist_name, album_name,
-                    youtube_url, youtube_video_id, spotify_track_id
-                ) VALUES ('web', %s, %s, %s, %s, %s, %s)
-                RETURNING id, spotify_track_id, youtube_url
+                    youtube_url, youtube_video_id, spotify_track_id, lyricist, composer, arranger
+                ) VALUES ('web', %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, spotify_track_id, youtube_url, lyricist, composer, arranger
                 """,
-                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, payload.spotify_track_id),
+                (payload.title, payload.artist_name, payload.album_name, youtube_url, video_id, payload.spotify_track_id,
+                 credits.lyricist if credits else None, credits.composer if credits else None,
+                 credits.arranger if credits else None),
             ).fetchone()
         conn.commit()
     has_lyrics = bool(existing["has_lyrics"]) if existing else False
@@ -404,6 +421,34 @@ def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> Son
         spotify_track_id=row["spotify_track_id"],
         youtube_url=row["youtube_url"],
         has_lyrics=has_lyrics,
+        lyricist=row["lyricist"],
+        composer=row["composer"],
+        arranger=row["arranger"],
+    )
+
+
+@app.patch("/songs/{song_id}/credits", response_model=SongLyricsSummary)
+def update_song_credits(song_id: int, payload: SongCreditsUpdate) -> SongLyricsSummary:
+    """Save manually entered song credits when an official description has none."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE songs
+            SET lyricist = %s, composer = %s, arranger = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            RETURNING id, spotify_track_id, youtube_url, lyricist, composer, arranger,
+                EXISTS (SELECT 1 FROM song_lyrics l WHERE l.song_id = songs.id) AS has_lyrics
+            """,
+            (payload.lyricist, payload.composer, payload.arranger, song_id),
+        ).fetchone()
+        conn.commit()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Song not found.")
+    if not row["spotify_track_id"]:
+        raise HTTPException(status_code=409, detail="This song is not linked to a Spotify track.")
+    return SongLyricsSummary(
+        song_id=row["id"], spotify_track_id=row["spotify_track_id"], youtube_url=row["youtube_url"],
+        has_lyrics=row["has_lyrics"], lyricist=row["lyricist"], composer=row["composer"], arranger=row["arranger"],
     )
 
 

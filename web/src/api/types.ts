@@ -23,6 +23,15 @@ export interface SongLyricsSummary {
   spotify_track_id: string
   youtube_url: string
   has_lyrics: boolean
+  lyricist: string | null
+  composer: string | null
+  arranger: string | null
+}
+
+export interface SongCreditsUpdate {
+  lyricist: string | null
+  composer: string | null
+  arranger: string | null
 }
 
 export interface SpotifyTrackYouTubeLinkCreate {

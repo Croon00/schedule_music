@@ -675,6 +675,9 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS lyricist TEXT")
+        conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS composer TEXT")
+        conn.execute("ALTER TABLE songs ADD COLUMN IF NOT EXISTS arranger TEXT")
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS review_notes TEXT")
         conn.execute("ALTER TABLE song_lyrics ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ")
         conn.execute(

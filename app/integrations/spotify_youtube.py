@@ -10,7 +10,11 @@ import httpx
 from app.core.config import settings
 from app.core.db import get_connection
 from app.integrations.spotify import SpotifyDiscographyTrack, get_artist_discography_tracks
-from app.integrations.youtube_context import YOUTUBE_API_BASE_URL, youtube_data_api_configured
+from app.integrations.youtube_context import (
+    YOUTUBE_API_BASE_URL,
+    fetch_youtube_music_credits,
+    youtube_data_api_configured,
+)
 
 
 @dataclass(frozen=True)
@@ -84,7 +88,15 @@ def _existing_track_ids(track_ids: list[str]) -> set[str]:
     return {str(row["spotify_track_id"]) for row in rows if row["spotify_track_id"]}
 
 
-def _save_link(track: SpotifyDiscographyTrack, video_id: str, youtube_url: str) -> None:
+def _save_link(
+    track: SpotifyDiscographyTrack,
+    video_id: str,
+    youtube_url: str,
+    *,
+    lyricist: str | None = None,
+    composer: str | None = None,
+    arranger: str | None = None,
+) -> None:
     """Save only a confirmed automatic video link; lyrics are never created here."""
     artist_name = ", ".join(track.artists)
     with get_connection() as conn:
@@ -92,16 +104,19 @@ def _save_link(track: SpotifyDiscographyTrack, video_id: str, youtube_url: str) 
             """
             INSERT INTO songs (
                 discord_user_id, original_title, artist_name, album_name,
-                youtube_url, youtube_video_id, spotify_track_id
-            ) VALUES ('web', %s, %s, %s, %s, %s, %s)
+                youtube_url, youtube_video_id, spotify_track_id, lyricist, composer, arranger
+            ) VALUES ('web', %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (discord_user_id, youtube_video_id) DO UPDATE
             SET original_title = EXCLUDED.original_title,
                 artist_name = EXCLUDED.artist_name,
                 album_name = EXCLUDED.album_name,
                 spotify_track_id = EXCLUDED.spotify_track_id,
+                lyricist = EXCLUDED.lyricist,
+                composer = EXCLUDED.composer,
+                arranger = EXCLUDED.arranger,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (track.name, artist_name, track.album_name, youtube_url, video_id, track.id),
+            (track.name, artist_name, track.album_name, youtube_url, video_id, track.id, lyricist, composer, arranger),
         )
         conn.commit()
 
@@ -135,7 +150,19 @@ async def auto_link_spotify_artist_youtube(spotify_artist_id: str) -> YouTubeAut
     for track, match in matches:
         if match is None:
             continue
-        _save_link(track, *match)
+        video_id, youtube_url = match
+        try:
+            credits = await fetch_youtube_music_credits(video_id)
+        except (RuntimeError, httpx.HTTPError):
+            credits = None
+        _save_link(
+            track,
+            video_id,
+            youtube_url,
+            lyricist=credits.lyricist if credits else None,
+            composer=credits.composer if credits else None,
+            arranger=credits.arranger if credits else None,
+        )
         linked += 1
     return YouTubeAutoLinkResult(
         scanned_tracks=len(candidates),
