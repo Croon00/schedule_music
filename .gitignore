@@ -7,6 +7,8 @@ tmp_pytest*/
 data/*.db
 data/*.db-*
 exports/
+*.stdout.log
+*.stderr.log
 *-local.stdout.log
 *-local.stderr.log
 web/node_modules/

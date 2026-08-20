@@ -137,6 +137,8 @@ export interface SpotifyArtistCandidate {
   genres: string[]
 }
 
+export interface SpotifyArtistProfile extends SpotifyArtistCandidate {}
+
 export interface SpotifyAlbum {
   id: string
   name: string

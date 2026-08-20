@@ -13,6 +13,7 @@ import type {
   SpotifyAlbumDetail,
   SpotifyArtist,
   SpotifyArtistCandidate,
+  SpotifyArtistProfile,
   SpotifyRelationship,
   EventType,
   EventFormat,
@@ -155,6 +156,8 @@ export const api = {
     artists: () => request<SpotifyArtist[]>('/spotify/artists'),
     artistCandidates: (artistId: number) =>
       request<SpotifyArtistCandidate[]>(`/spotify/artists/${artistId}/candidates`),
+    artistProfile: (artistId: number) =>
+      request<SpotifyArtistProfile>(`/spotify/artists/${artistId}/profile`),
     syncArtist: (artistId: number, spotifyArtistId: string) =>
       request<SpotifyArtist>(`/spotify/artists/${artistId}/sync?spotify_artist_id=${encodeURIComponent(spotifyArtistId)}`, { method: 'POST' }),
     excludeArtist: (artistId: number) =>

@@ -588,6 +588,28 @@ async def get_spotify_artist_candidates(artist_id: int) -> list[SpotifyArtistPro
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
+@app.get("/spotify/artists/{artist_id}/profile", response_model=SpotifyArtistProfile)
+async def get_spotify_artist_profile(artist_id: int) -> SpotifyArtistProfile:
+    """Fetch the latest Spotify profile metadata for one matched artist."""
+    if not spotify_configured():
+        raise HTTPException(status_code=503, detail="Spotify API가 설정되어 있지 않습니다.")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT spotify_artist_id FROM artists WHERE id = %s",
+            (artist_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="아티스트를 찾을 수 없습니다.")
+    if not row["spotify_artist_id"]:
+        raise HTTPException(status_code=409, detail="Spotify 아티스트 매칭이 필요합니다.")
+
+    try:
+        return await get_spotify_artist(artist_id, row["spotify_artist_id"])
+    except SpotifyApiError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @app.post("/spotify/artists/{artist_id}/sync", response_model=SpotifyRegisteredArtist)
 async def sync_spotify_artist(
     artist_id: int,

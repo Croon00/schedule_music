@@ -24,6 +24,12 @@ const discographyQuery = useQuery({
   queryFn: () => api.spotify.discography(artistId.value),
   enabled: computed(() => Boolean(artist.value?.matched)),
 })
+const artistProfileQuery = useQuery({
+  queryKey: ['spotify-artist-profile', artistId],
+  queryFn: () => api.spotify.artistProfile(artistId.value),
+  enabled: computed(() => Boolean(artist.value?.matched)),
+  staleTime: 60 * 60_000,
+})
 const albumQuery = useQuery({
   queryKey: ['spotify-album', selectedAlbumId],
   queryFn: () => api.spotify.album(selectedAlbumId.value as string),
@@ -58,6 +64,23 @@ function duration(milliseconds: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+const genreDescriptions: Record<string, string> = {
+  'j-pop': '일본 대중음악을 중심으로 한 팝 성향입니다.',
+  anime: '애니메이션 작품과 연관된 음악 성향입니다.',
+  vocaloid: '보컬로이드 문화와 연결된 음악 성향입니다.',
+  electronic: '신시사이저와 전자적 사운드를 중심으로 한 성향입니다.',
+  'japanese electronic': '일본 전자음악 계열의 사운드 성향입니다.',
+  rock: '밴드 사운드와 강한 리듬을 중심으로 한 성향입니다.',
+  alternative: '주류 팝과 다른 독자적 사운드를 폭넓게 묶는 태그입니다.',
+  indie: '인디 씬과 독립 레이블 중심의 음악 성향입니다.',
+  'japanese indie': '일본 인디 씬과 연결된 음악 성향입니다.',
+  pop: '대중적인 멜로디와 보컬 중심의 팝 성향입니다.',
+}
+
+function genreDescription(genre: string): string {
+  return genreDescriptions[genre.toLowerCase()] || 'Spotify가 이 아티스트에게 연결한 음악 성향 태그입니다.'
+}
+
 function confirmExclusion(): void {
   if (!artist.value) return
   if (window.confirm(`${artist.value.spotify_name || artist.value.local_name}의 Spotify 연결을 제거할까요? X 계정은 유지됩니다.`)) {
@@ -83,6 +106,13 @@ function confirmExclusion(): void {
           <h1>{{ artist.spotify_name || artist.local_name }}</h1>
           <span>{{ artist.artist_kind === 'vtuber' ? 'Virtual Artist' : 'Music Artist' }}</span>
           <a v-if="artist.spotify_url" :href="artist.spotify_url" target="_blank" rel="noreferrer" class="spotify-attribution">Spotify에서 확인 ↗</a>
+          <div v-if="artistProfileQuery.data.value?.genres.length" class="artist-genre-list" aria-label="Spotify 장르 태그">
+            <div v-for="genre in artistProfileQuery.data.value.genres" :key="genre" class="artist-genre">
+              <strong>{{ genre }}</strong>
+              <span>{{ genreDescription(genre) }}</span>
+            </div>
+          </div>
+          <p v-else-if="artistProfileQuery.isSuccess.value" class="artist-genre-empty">Spotify에 등록된 장르 태그가 없습니다.</p>
         </div>
         <UButton class="button button--danger" :disabled="excludeArtist.isPending.value" @click="confirmExclusion">Spotify 연결 제거</UButton>
       </section>
