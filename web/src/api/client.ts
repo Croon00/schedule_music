@@ -5,8 +5,6 @@ import type {
   CandidateStatus,
   EventCandidate,
   EventCandidateCreate,
-  NamuWikiTemplate,
-  SongArticleInput,
   SongCreditsUpdate,
   SongLyricsDetail,
   SongLyricsSummary,
@@ -140,31 +138,6 @@ export const api = {
   google: {
     connectUrl: (discordUserId: string) =>
       `${API_BASE}/auth/google/start?discord_user_id=${encodeURIComponent(discordUserId)}`,
-  },
-  namuwiki: {
-    templates: () => request<NamuWikiTemplate[]>('/namuwiki/templates'),
-    saveTemplate: (payload: Required<Pick<NamuWikiTemplate, 'template_id' | 'name'>> & {
-      description?: string
-      template_example: string
-    }) =>
-      request<NamuWikiTemplate>('/namuwiki/templates', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      }),
-    render: (song: SongArticleInput) =>
-      request<{ text: string }>('/namuwiki/song-article', {
-        method: 'POST',
-        body: JSON.stringify(song),
-      }),
-    renderWithSavedTemplate: (templateId: string, song: SongArticleInput, instruction?: string) =>
-      request<{ text: string }>('/namuwiki/song-article/from-saved-template', {
-        method: 'POST',
-        body: JSON.stringify({
-          template_id: templateId,
-          song,
-          extra_instruction: instruction || null,
-        }),
-      }),
   },
   spotify: {
     artists: () => request<SpotifyArtist[]>('/spotify/artists'),

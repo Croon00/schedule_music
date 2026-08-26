@@ -229,8 +229,8 @@ def _performer_for_singing_stream(default_artist_name: str, video_title: str) ->
         return VESPERBELL_ARTIST_NAME
 
     if default_artist_name.casefold() == KMNZ_ARTIST_NAME.casefold():
-        # Check individual tags before the generic #KMNZ tag, because every
-        # member tag has that group prefix.
+        # 모든 멤버 태그에 그룹 접두사가 있으므로 일반 #KMNZ 태그보다
+        # 개별 멤버 태그를 먼저 확인합니다.
         normalized_title = video_title.upper()
         if "#KMNZLITA" in normalized_title:
             return KMNZ_LITA_ARTIST_NAME
@@ -284,8 +284,8 @@ async def backfill_youtube_channel(
                 ).fetchone()
             return True, bool(row and row["song_count"])
         except Exception:
-            # Do not log HTTP request URLs here: they include the API key in
-            # the query string and can leak it into routine task logs.
+            # HTTP 요청 URL에는 쿼리 문자열의 API 키가 포함되므로 일반 작업
+            # 로그에 기록하지 않습니다.
             logger.warning("YouTube historical backfill failed for video %s", video["youtube_video_id"])
             return False, False
 

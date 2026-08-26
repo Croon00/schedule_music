@@ -6,7 +6,7 @@ import re
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.core.db import get_connection
+from app.repositories.spotify_title_translations import find_cached_titles, save_titles
 
 
 TITLE_TRANSLATION_SCHEMA = {
@@ -36,49 +36,15 @@ JAPANESE_TITLE_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u9fff々〆ヶ]")
 
 
 def _cached_titles(tracks: list[tuple[str, str]]) -> dict[str, str]:
-    if not tracks:
-        return {}
-    ids = [track_id for track_id, _ in tracks]
-    original_by_id = dict(tracks)
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT spotify_track_id, original_title, title_ko
-            FROM spotify_track_title_translations
-            WHERE spotify_track_id = ANY(%s)
-            """,
-            (ids,),
-        ).fetchall()
-    return {
-        row["spotify_track_id"]: row["title_ko"]
-        for row in rows
-        if row["original_title"] == original_by_id.get(row["spotify_track_id"])
-    }
+    return find_cached_titles(tracks)
 
 
 def _store_titles(translations: dict[str, str], original_by_id: dict[str, str]) -> None:
-    if not translations:
-        return
-    with get_connection() as conn:
-        for track_id, title_ko in translations.items():
-            conn.execute(
-                """
-                INSERT INTO spotify_track_title_translations (
-                    spotify_track_id, original_title, title_ko, model
-                ) VALUES (%s, %s, %s, %s)
-                ON CONFLICT (spotify_track_id) DO UPDATE
-                SET original_title = EXCLUDED.original_title,
-                    title_ko = EXCLUDED.title_ko,
-                    model = EXCLUDED.model,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (track_id, original_by_id[track_id], title_ko, settings.openai_model),
-            )
-        conn.commit()
+    save_titles(translations, original_by_id)
 
 
 async def resolve_korean_track_titles(tracks: list[tuple[str, str]]) -> dict[str, str]:
-    """Return cached Korean translations and translate only unseen Japanese titles."""
+    """캐시된 한국어 제목을 반환하고, 새 일본어 제목만 번역합니다."""
     cached = _cached_titles(tracks)
     missing = [
         (track_id, title)
@@ -94,7 +60,7 @@ async def resolve_korean_track_titles(tracks: list[tuple[str, str]]) -> dict[str
 
 
 async def translate_japanese_titles(titles: list[tuple[str, str]]) -> dict[str, str]:
-    """Translate Japanese titles without persisting them; callers own their cache."""
+    """일본어 제목을 번역만 하며 저장 여부는 호출자가 결정합니다."""
     candidates = [
         (item_id, title)
         for item_id, title in titles
@@ -103,15 +69,15 @@ async def translate_japanese_titles(titles: list[tuple[str, str]]) -> dict[str, 
     if not candidates or not settings.openai_api_key:
         return {}
     translated: dict[str, str] = {}
-    # Keep structured-output responses compact and reliable for large live
-    # setlists/backfills.
+    # 대규모 라이브 세트리스트와 backfill에서도 구조화 응답을 작고 안정적으로
+    # 유지하기 위해 한 번에 처리하는 항목 수를 제한합니다.
     for start in range(0, len(candidates), 25):
         translated.update(await _translate_title_batch(candidates[start:start + 25]))
     return translated
 
 
 async def translate_japanese_artist_names(names: list[tuple[str, str]]) -> dict[str, str]:
-    """Return Korean-readable artist names, preserving established name forms."""
+    """널리 쓰이는 표기를 보존해 한국어로 읽을 수 있는 아티스트명을 반환합니다."""
     candidates = [
         (item_id, name)
         for item_id, name in names

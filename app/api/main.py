@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, HttpUrl
@@ -64,23 +64,7 @@ from app.integrations.spotify import (
     spotify_configured,
 )
 from app.integrations.spotify_youtube import auto_link_spotify_artist_youtube
-from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
-from app.namuwiki.models import (
-    NamuWikiSavedTemplateSongArticleRequest,
-    NamuWikiSongArticleRequest,
-    NamuWikiSongArticleResponse,
-    NamuWikiTemplateCreate,
-    NamuWikiTemplateDetail,
-    NamuWikiTemplateInfo,
-    NamuWikiTemplateSongArticleRequest,
-)
-from app.namuwiki.renderer import render_song_article
-from app.namuwiki.template_store import (
-    NamuWikiTemplateNotFoundError,
-    get_template,
-    list_templates,
-    save_template,
-)
+from app.api.routers.artists import router as artists_router
 
 
 @asynccontextmanager
@@ -99,6 +83,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+# 새 클라이언트는 /api 경로를 사용합니다. 마이그레이션 중 현재 프론트엔드와
+# 기존 링크가 깨지지 않도록 접두사 없는 경로도 한시적으로 유지합니다.
+app.include_router(artists_router, prefix="/api")
+app.include_router(artists_router)
+# 이전 인라인 handler는 소스 수준의 마이그레이션 참고용으로만 보존합니다.
+# 실제로 mount하지 않으며, 현재 아티스트 도메인은 router가 담당합니다.
+_deprecated_router = APIRouter(include_in_schema=False)
 youtube_backfill_tasks: set[asyncio.Task] = set()
 
 
@@ -118,7 +109,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/youtube-lives", status_code=status.HTTP_201_CREATED)
+@_deprecated_router.post("/youtube-lives", status_code=status.HTTP_201_CREATED)
 async def create_youtube_live(payload: YouTubeLiveCreate) -> dict:
     try:
         archive_id = await add_youtube_live_url(str(payload.youtube_url), payload.artist_name)
@@ -132,7 +123,7 @@ async def create_youtube_live(payload: YouTubeLiveCreate) -> dict:
     return archive
 
 
-@app.post("/youtube-lives/backfills", status_code=status.HTTP_202_ACCEPTED)
+@_deprecated_router.post("/youtube-lives/backfills", status_code=status.HTTP_202_ACCEPTED)
 async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate) -> dict[str, str]:
     """Start an idempotent historical utawaku collection without blocking the UI."""
     task = asyncio.create_task(
@@ -147,17 +138,17 @@ async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate) ->
     return {"status": "started", "artist_name": payload.artist_name.strip()}
 
 
-@app.get("/youtube-lives")
+@_deprecated_router.get("/youtube-lives")
 def get_youtube_lives(limit: int = 50, artist_name: str | None = None) -> list[dict]:
     return list_youtube_live_archives(
         limit=max(1, min(limit, 100)), artist_name=artist_name.strip() if artist_name else None
     )
 
 
-@app.get("/youtube-lives/{archive_id}")
+@_deprecated_router.get("/youtube-lives/{archive_id}")
 async def get_youtube_live(archive_id: int) -> dict:
-    # Older archives predate Korean labels. Fill them on first open so the
-    # detailed setlist never stays permanently untranslated.
+    # 오래된 archive에는 한국어 라벨이 없을 수 있으므로 첫 조회 시 채웁니다.
+    # 이를 통해 상세 세트리스트가 번역되지 않은 채 남지 않게 합니다.
     await ensure_youtube_live_korean_labels(archive_id)
     archive = get_youtube_live_archive(archive_id)
     if archive is None:
@@ -165,7 +156,7 @@ async def get_youtube_live(archive_id: int) -> dict:
     return archive
 
 
-@app.get("/youtube-performances")
+@_deprecated_router.get("/youtube-performances")
 def search_youtube_performances(
     artist_name: list[str] = Query(default=[]),
     song_title: list[str] = Query(default=[]),
@@ -183,12 +174,12 @@ def search_youtube_performances(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/youtube-performance-filters")
+@_deprecated_router.get("/youtube-performance-filters")
 def get_youtube_performance_filters() -> dict[str, list[str]]:
     return list_youtube_performance_filters()
 
 
-@app.patch("/youtube-performances/{performance_id}")
+@_deprecated_router.patch("/youtube-performances/{performance_id}")
 def patch_youtube_performance(performance_id: int, payload: YouTubePerformanceUpdate) -> dict:
     try:
         updated = update_youtube_song_performance(
@@ -201,63 +192,7 @@ def patch_youtube_performance(performance_id: int, payload: YouTubePerformanceUp
     return updated
 
 
-@app.post("/namuwiki/song-article", response_model=NamuWikiSongArticleResponse)
-def create_namuwiki_song_article(
-    payload: NamuWikiSongArticleRequest,
-) -> NamuWikiSongArticleResponse:
-    return NamuWikiSongArticleResponse(text=render_song_article(payload))
-
-
-@app.post("/namuwiki/song-article/from-template", response_model=NamuWikiSongArticleResponse)
-async def create_namuwiki_song_article_from_template(
-    payload: NamuWikiTemplateSongArticleRequest,
-) -> NamuWikiSongArticleResponse:
-    try:
-        text = await render_song_article_from_template(payload)
-    except NamuWikiAiRenderError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return NamuWikiSongArticleResponse(text=text)
-
-
-@app.post("/namuwiki/templates", response_model=NamuWikiTemplateDetail)
-def create_namuwiki_template(payload: NamuWikiTemplateCreate) -> NamuWikiTemplateDetail:
-    return save_template(payload)
-
-
-@app.get("/namuwiki/templates", response_model=list[NamuWikiTemplateInfo])
-def get_namuwiki_templates() -> list[NamuWikiTemplateInfo]:
-    return list_templates()
-
-
-@app.get("/namuwiki/templates/{template_id}", response_model=NamuWikiTemplateDetail)
-def get_namuwiki_template(template_id: str) -> NamuWikiTemplateDetail:
-    try:
-        return get_template(template_id)
-    except NamuWikiTemplateNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Template not found.") from exc
-
-
-@app.post("/namuwiki/song-article/from-saved-template", response_model=NamuWikiSongArticleResponse)
-async def create_namuwiki_song_article_from_saved_template(
-    payload: NamuWikiSavedTemplateSongArticleRequest,
-) -> NamuWikiSongArticleResponse:
-    try:
-        template = get_template(payload.template_id)
-        text = await render_song_article_from_template(
-            NamuWikiTemplateSongArticleRequest(
-                template_example=template.template_example,
-                song=payload.song,
-                extra_instruction=payload.extra_instruction,
-            )
-        )
-    except NamuWikiTemplateNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Template not found.") from exc
-    except NamuWikiAiRenderError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return NamuWikiSongArticleResponse(text=text)
-
-
-@app.get("/auth/google/start")
+@_deprecated_router.get("/auth/google/start")
 def start_google_auth(discord_user_id: str) -> RedirectResponse:
     """Discord 사용자 ID를 state로 담아 Google OAuth 로그인 화면으로 이동시킵니다."""
     if not google_oauth_configured():
@@ -265,7 +200,7 @@ def start_google_auth(discord_user_id: str) -> RedirectResponse:
     return RedirectResponse(build_google_auth_url(discord_user_id))
 
 
-@app.get("/auth/google/callback", response_class=HTMLResponse)
+@_deprecated_router.get("/auth/google/callback", response_class=HTMLResponse)
 async def google_auth_callback(code: str, state: str) -> str:
     """Google OAuth callback에서 인증 code를 토큰으로 바꾸고 연결 완료 HTML을 보여줍니다."""
     await exchange_code_for_tokens(code, state)
@@ -279,7 +214,7 @@ async def google_auth_callback(code: str, state: str) -> str:
     """
 
 
-@app.get("/artist-agencies", response_model=list[ArtistAgency])
+@_deprecated_router.get("/artist-agencies", response_model=list[ArtistAgency])
 def list_artist_agencies() -> list[dict]:
     """VTuber 소속 필터에 사용할 기업·레이블 목록을 반환합니다."""
     with get_connection() as conn:
@@ -287,7 +222,7 @@ def list_artist_agencies() -> list[dict]:
         return [row_to_dict(row) for row in rows]
 
 
-@app.post("/artist-agencies", response_model=ArtistAgency, status_code=status.HTTP_201_CREATED)
+@_deprecated_router.post("/artist-agencies", response_model=ArtistAgency, status_code=status.HTTP_201_CREATED)
 def create_artist_agency(payload: ArtistAgencyCreate) -> dict:
     """새 VTuber 소속 기업·레이블을 등록합니다."""
     name = payload.name.strip()
@@ -303,7 +238,7 @@ def create_artist_agency(payload: ArtistAgencyCreate) -> dict:
         raise HTTPException(status_code=409, detail="이미 등록된 소속입니다.") from exc
 
 
-@app.post("/songs/from-youtube", response_model=WebSongCreated, status_code=status.HTTP_201_CREATED)
+@_deprecated_router.post("/songs/from-youtube", response_model=WebSongCreated, status_code=status.HTTP_201_CREATED)
 async def create_song_from_youtube(payload: WebSongCreate) -> dict:
     """등록 아티스트의 YouTube 곡에서 가사·번역·발음을 생성해 저장합니다."""
     with get_connection() as conn:
@@ -325,7 +260,7 @@ async def create_song_from_youtube(payload: WebSongCreate) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/songs/lyrics/by-spotify-tracks", response_model=list[SongLyricsSummary])
+@_deprecated_router.get("/songs/lyrics/by-spotify-tracks", response_model=list[SongLyricsSummary])
 def list_song_lyrics_by_spotify_tracks(ids: list[str] = Query(default=[])) -> list[SongLyricsSummary]:
     """Return saved lyric records for a set of Spotify track IDs."""
     track_ids = list(dict.fromkeys(track_id for track_id in ids if track_id.strip()))
@@ -364,7 +299,7 @@ def list_song_lyrics_by_spotify_tracks(ids: list[str] = Query(default=[])) -> li
     return results
 
 
-@app.post("/songs/spotify-track-youtube", response_model=SongLyricsSummary)
+@_deprecated_router.post("/songs/spotify-track-youtube", response_model=SongLyricsSummary)
 async def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) -> SongLyricsSummary:
     """Attach a user-selected YouTube video to a Spotify track without creating lyrics yet."""
     youtube_url = payload.youtube_url.strip()
@@ -431,7 +366,7 @@ async def link_spotify_track_to_youtube(payload: SpotifyTrackYouTubeLinkCreate) 
     )
 
 
-@app.patch("/songs/{song_id}/credits", response_model=SongLyricsSummary)
+@_deprecated_router.patch("/songs/{song_id}/credits", response_model=SongLyricsSummary)
 def update_song_credits(song_id: int, payload: SongCreditsUpdate) -> SongLyricsSummary:
     """Save manually entered song credits when an official description has none."""
     with get_connection() as conn:
@@ -456,7 +391,7 @@ def update_song_credits(song_id: int, payload: SongCreditsUpdate) -> SongLyricsS
     )
 
 
-@app.get("/songs/{song_id}/lyrics", response_model=SongLyricsDetail)
+@_deprecated_router.get("/songs/{song_id}/lyrics", response_model=SongLyricsDetail)
 def get_song_lyrics(song_id: int) -> SongLyricsDetail:
     """Return the original lyrics, Korean translation, and pronunciation for one saved song."""
     with get_connection() as conn:
@@ -480,7 +415,7 @@ def get_song_lyrics(song_id: int) -> SongLyricsDetail:
     return SongLyricsDetail(**row_to_dict(row))
 
 
-@app.post("/artists", response_model=ArtistWithSources, status_code=status.HTTP_201_CREATED)
+@_deprecated_router.post("/artists", response_model=ArtistWithSources, status_code=status.HTTP_201_CREATED)
 def create_artist(payload: ArtistCreate) -> dict:
     """API로 아티스트를 생성하고, X username이 있으면 출처도 함께 저장합니다."""
     with get_connection() as conn:
@@ -512,7 +447,7 @@ def create_artist(payload: ArtistCreate) -> dict:
         return _get_artist_with_sources(conn, artist_id)
 
 
-@app.get("/artists", response_model=list[ArtistWithSources])
+@_deprecated_router.get("/artists", response_model=list[ArtistWithSources])
 def list_artists() -> list[dict]:
     """등록된 전체 아티스트와 연결된 출처 목록을 조회합니다."""
     with get_connection() as conn:
@@ -520,14 +455,14 @@ def list_artists() -> list[dict]:
         return [_get_artist_with_sources(conn, row["id"]) for row in rows]
 
 
-@app.get("/artists/{artist_id}", response_model=ArtistWithSources)
+@_deprecated_router.get("/artists/{artist_id}", response_model=ArtistWithSources)
 def get_artist(artist_id: int) -> dict:
     """특정 아티스트 한 명과 연결된 출처 목록을 조회합니다."""
     with get_connection() as conn:
         return _get_artist_with_sources(conn, artist_id)
 
 
-@app.patch("/artists/{artist_id}", response_model=Artist)
+@_deprecated_router.patch("/artists/{artist_id}", response_model=Artist)
 def update_artist(artist_id: int, payload: ArtistUpdate) -> dict:
     """아티스트의 이름, 표시 이름, 메모를 부분 수정합니다."""
     fields = payload.model_dump(exclude_unset=True)
@@ -552,7 +487,7 @@ def update_artist(artist_id: int, payload: ArtistUpdate) -> dict:
         return row_to_dict(row)
 
 
-@app.delete("/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@_deprecated_router.delete("/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_artist(artist_id: int) -> Response:
     """아티스트를 삭제하고 연결된 출처는 DB cascade 설정으로 함께 정리합니다."""
     with get_connection() as conn:
@@ -562,7 +497,7 @@ def delete_artist(artist_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.post(
+@_deprecated_router.post(
     "/artists/{artist_id}/sources",
     response_model=Source,
     status_code=status.HTTP_201_CREATED,
@@ -599,7 +534,7 @@ def add_artist_source(artist_id: int, payload: SourceCreate) -> dict:
         return _source_row_to_dict(row)
 
 
-@app.get("/artists/{artist_id}/sources", response_model=list[Source])
+@_deprecated_router.get("/artists/{artist_id}/sources", response_model=list[Source])
 def list_artist_sources(artist_id: int) -> list[dict]:
     """특정 아티스트에 등록된 출처 목록을 조회합니다."""
     with get_connection() as conn:
@@ -615,7 +550,7 @@ def list_artist_sources(artist_id: int) -> list[dict]:
         return [_source_row_to_dict(row) for row in rows]
 
 
-@app.delete("/artists/{artist_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+@_deprecated_router.delete("/artists/{artist_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_artist_source(artist_id: int, source_id: int) -> Response:
     """특정 아티스트에 연결된 출처 하나를 삭제합니다."""
     with get_connection() as conn:
@@ -630,7 +565,7 @@ def delete_artist_source(artist_id: int, source_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.post("/event-candidates", response_model=EventCandidate, status_code=status.HTTP_201_CREATED)
+@_deprecated_router.post("/event-candidates", response_model=EventCandidate, status_code=status.HTTP_201_CREATED)
 def create_event_candidate(payload: EventCandidateCreate) -> dict:
     """수동 또는 agent가 만든 공연/예매 일정 후보를 저장합니다."""
     data = payload.model_dump()
@@ -670,7 +605,7 @@ def create_event_candidate(payload: EventCandidateCreate) -> dict:
         return row_to_dict(row)
 
 
-@app.get("/event-candidates", response_model=list[EventCandidate])
+@_deprecated_router.get("/event-candidates", response_model=list[EventCandidate])
 def list_event_candidates(
     status_filter: str | None = None,
     artist_id: int | None = None,
@@ -701,7 +636,7 @@ def list_event_candidates(
         return [row_to_dict(row) for row in rows]
 
 
-@app.get("/spotify/artists", response_model=list[SpotifyRegisteredArtist])
+@_deprecated_router.get("/spotify/artists", response_model=list[SpotifyRegisteredArtist])
 def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
     """등록 아티스트와 현재 Spotify 매칭 상태를 반환합니다."""
     with get_connection() as conn:
@@ -731,7 +666,7 @@ def list_spotify_artists() -> list[SpotifyRegisteredArtist]:
     ]
 
 
-@app.get(
+@_deprecated_router.get(
     "/spotify/artists/{artist_id}/candidates",
     response_model=list[SpotifyArtistProfile],
 )
@@ -755,7 +690,7 @@ async def get_spotify_artist_candidates(artist_id: int) -> list[SpotifyArtistPro
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-@app.get("/spotify/artists/{artist_id}/profile", response_model=SpotifyArtistProfile)
+@_deprecated_router.get("/spotify/artists/{artist_id}/profile", response_model=SpotifyArtistProfile)
 async def get_spotify_artist_profile(artist_id: int) -> SpotifyArtistProfile:
     """Fetch the latest Spotify profile metadata for one matched artist."""
     if not spotify_configured():
@@ -777,7 +712,7 @@ async def get_spotify_artist_profile(artist_id: int) -> SpotifyArtistProfile:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-@app.post("/spotify/artists/{artist_id}/sync", response_model=SpotifyRegisteredArtist)
+@_deprecated_router.post("/spotify/artists/{artist_id}/sync", response_model=SpotifyRegisteredArtist)
 async def sync_spotify_artist(
     artist_id: int,
     spotify_artist_id: str,
@@ -839,7 +774,7 @@ async def sync_spotify_artist(
     )
 
 
-@app.post("/spotify/artists/{artist_id}/youtube-auto-link", response_model=SpotifyRegisteredArtist)
+@_deprecated_router.post("/spotify/artists/{artist_id}/youtube-auto-link", response_model=SpotifyRegisteredArtist)
 async def auto_link_existing_spotify_artist_youtube(artist_id: int) -> SpotifyRegisteredArtist:
     """Run the automatic YouTube matcher again for an already linked artist."""
     with get_connection() as conn:
@@ -869,7 +804,7 @@ async def auto_link_existing_spotify_artist_youtube(artist_id: int) -> SpotifyRe
     )
 
 
-@app.delete("/spotify/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@_deprecated_router.delete("/spotify/artists/{artist_id}", status_code=status.HTTP_204_NO_CONTENT)
 def exclude_spotify_artist(artist_id: int) -> Response:
     """Spotify 매칭을 지우고 이후 전체 동기화 대상에서도 제외합니다."""
     with get_connection() as conn:
@@ -892,7 +827,7 @@ def exclude_spotify_artist(artist_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.post("/spotify/artists/{artist_id}/enable", status_code=status.HTTP_204_NO_CONTENT)
+@_deprecated_router.post("/spotify/artists/{artist_id}/enable", status_code=status.HTTP_204_NO_CONTENT)
 def enable_spotify_artist(artist_id: int) -> Response:
     """제외한 아티스트를 Spotify 전체 동기화 대상에 다시 포함합니다."""
     with get_connection() as conn:
@@ -909,7 +844,7 @@ def enable_spotify_artist(artist_id: int) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.get(
+@_deprecated_router.get(
     "/spotify/artists/{artist_id}/discography",
     response_model=list[SpotifyAlbumSummary],
 )
@@ -927,7 +862,7 @@ async def get_spotify_discography(artist_id: int) -> list[SpotifyAlbumSummary]:
     return await get_artist_discography(row["spotify_artist_id"])
 
 
-@app.get("/spotify/albums/{album_id}", response_model=SpotifyAlbumDetail)
+@_deprecated_router.get("/spotify/albums/{album_id}", response_model=SpotifyAlbumDetail)
 async def get_spotify_album(album_id: str) -> SpotifyAlbumDetail:
     """한 앨범 또는 싱글의 전체 수록곡을 반환합니다."""
     if not spotify_configured():
@@ -938,7 +873,7 @@ async def get_spotify_album(album_id: str) -> SpotifyAlbumDetail:
         raise HTTPException(status_code=502, detail="Spotify 앨범 조회에 실패했습니다.") from exc
 
 
-@app.get("/spotify/relationships", response_model=list[SpotifyRelationship])
+@_deprecated_router.get("/spotify/relationships", response_model=list[SpotifyRelationship])
 async def get_spotify_relationships() -> list[SpotifyRelationship]:
     """공동 앨범·싱글 크레딧을 이용해 등록 아티스트 사이의 연결을 계산합니다."""
     with get_connection() as conn:
@@ -1024,3 +959,15 @@ def _source_row_to_dict(row: dict | None) -> dict:
     if source is None:
         raise HTTPException(status_code=404, detail="출처를 찾을 수 없습니다.")
     return source
+
+
+# 호환성 모듈에서 endpoint 함수를 단계적으로 추출할 때 순환 import를 피하려고
+# handler 정의 뒤에 router를 import합니다.
+from app.api.routers.auth import router as auth_router
+from app.api.routers.songs import router as songs_router
+from app.api.routers.spotify import router as spotify_router
+from app.api.routers.youtube import router as youtube_router
+
+for _router in (auth_router, songs_router, spotify_router, youtube_router):
+    app.include_router(_router, prefix="/api")
+    app.include_router(_router)

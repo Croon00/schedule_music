@@ -54,20 +54,6 @@ from app.lyrics_pipeline.clients import (
 from app.lyrics_pipeline.models import LyricsInput, LyricsSourceType, RawLyrics
 from app.lyrics_pipeline.service import LyricsPipeline, LyricsPipelineError
 from app.lyrics_pipeline.youtube import canonical_youtube_watch_url, extract_youtube_video_id
-from app.namuwiki.ai_renderer import NamuWikiAiRenderError, render_song_article_from_template
-from app.namuwiki.models import (
-    NamuWikiCredit,
-    NamuWikiLyricLine,
-    NamuWikiSongArticleRequest,
-    NamuWikiTemplateCreate,
-    NamuWikiTemplateSongArticleRequest,
-)
-from app.namuwiki.template_store import (
-    NamuWikiTemplateNotFoundError,
-    get_template,
-    list_templates,
-    save_template,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +61,7 @@ LYRICS_SAMPLE_MAX_CHARS = 15000
 LYRICS_SAMPLE_MAX_LINES = 15000
 DISCORD_MESSAGE_MAX_CHARS = 1900
 LYRICS_EXPORT_DIR = Path("exports")
-NAMUWIKI_EXPORT_DIR = Path("exports") / "namuwiki"
 SONG_EXPORT_DIR = Path("exports") / "songs"
-NAMUWIKI_FIELD_MAX_CHARS = 500
 LyricsSourceMode = Literal["description", "comment", "caption", "audio", "file"]
 
 
@@ -2056,6 +2040,16 @@ async def namuwiki_render(
         file=discord.File(output_path),
         ephemeral=True,
     )
+
+
+# 나무위키 템플릿/문서 생성은 이 프로젝트 범위에서 제외한다. 과거에
+# decorator로 등록된 명령도 시작 전에 tree에서 제거해 Discord에 동기화되지 않게 한다.
+for _removed_command_name in (
+    "namuwiki_template_add",
+    "namuwiki_template_list",
+    "namuwiki_render",
+):
+    bot.tree.remove_command(_removed_command_name)
 
 
 async def start_discord_bot() -> None:

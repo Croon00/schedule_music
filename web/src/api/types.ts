@@ -129,32 +129,6 @@ export interface EventCandidate {
 
 export type EventCandidateCreate = Omit<EventCandidate, 'id' | 'created_at' | 'updated_at'>
 
-export interface NamuWikiTemplate {
-  template_id: string
-  name: string
-  description: string | null
-  template_example?: string
-}
-
-export interface SongArticleInput {
-  title: string
-  artist: string
-  release_date?: string
-  album?: string
-  album_type?: string
-  lyricist?: string
-  composer?: string
-  arranger?: string
-  intro?: string
-  youtube_url?: string
-  categories: string[]
-  lyrics: Array<{
-    original?: string
-    pronunciation_ko?: string
-    translation_ko?: string
-  }>
-}
-
 export interface SpotifyArtist {
   local_artist_id: number
   local_name: string

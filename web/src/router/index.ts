@@ -12,7 +12,6 @@ export const router = createRouter({
     { path: '/youtube-lives/artists/:artistId', name: 'youtube-live-artist', component: () => import('@/pages/YouTubeLivesPage.vue') },
     { path: '/lyrics', name: 'lyrics', component: () => import('@/pages/LyricsRegistrationPage.vue') },
     { path: '/lyrics/songs/:songId', name: 'lyrics-song', component: () => import('@/pages/SongLyricsPage.vue') },
-    { path: '/wiki', name: 'wiki', component: () => import('@/pages/WikiStudioPage.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/pages/SettingsPage.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

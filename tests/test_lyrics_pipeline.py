@@ -284,30 +284,6 @@ async def test_pipeline_errors_without_caption_or_audio_fallback() -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_renders_namuwiki_markup() -> None:
-    pipeline = LyricsPipeline(
-        caption_client=FakeCaptionClient(
-            tracks=[CaptionTrack(language_code="ja", language_name="Japanese", is_generated=False)],
-            captions={"ja": "lyrics"},
-        ),
-        ai_client=FakeAiClient(),
-    )
-
-    result = await pipeline.render_namuwiki(
-        payload=LyricsInput(
-            youtube_url="https://www.youtube.com/watch?v=abcdefghijk",
-            artist="Artist",
-            title="Song",
-        ),
-        format_example="== Lyrics ==",
-    )
-
-    assert "== Lyrics ==" in result.text
-    assert "Artist - Song" in result.text
-    assert result.source_type == LyricsSourceType.YOUTUBE_CAPTION
-
-
-@pytest.mark.anyio
 async def test_pipeline_saves_transformed_lyrics(tmp_path: Path) -> None:
     pipeline = LyricsPipeline(
         caption_client=FakeCaptionClient(

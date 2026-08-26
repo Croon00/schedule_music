@@ -47,8 +47,3 @@ class LyricsTransform(LyricsBaseModel):
     source_type: LyricsSourceType
     needs_review: bool
 
-
-class NamuWikiRender(LyricsBaseModel):
-    text: str
-    source_type: LyricsSourceType
-    needs_review: bool

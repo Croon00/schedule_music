@@ -379,8 +379,8 @@ def _build_notification_message(
             f"(\ubd84\ub958: [!!\ub77c\uc774\ube0c \uc815\ubcf4])\n{url}"
         )
     label = "!!라이브 정보" if item_type in {"live_event", "ticket"} else labels.get(item_type, item_type)
-    # A bare URL lets Discord render one X preview card. The post body is not
-    # repeated, so links inside the original post cannot create extra embeds.
+    # URL만 포함하면 Discord가 X 미리보기 카드 하나를 렌더링합니다. 원문 본문을
+    # 반복하지 않아 원문 안의 링크가 추가 embed를 만들지 않습니다.
     return f"{source['artist_name']} (분류: {label})\n{url}"
 
 
@@ -421,8 +421,8 @@ def _extract_post_urls(post: dict[str, Any]) -> list[str]:
         if not url or url in urls:
             continue
         hostname = (urlparse(url).hostname or "").lower()
-        # X pages repeat the post and profile bio. That can make ordinary
-        # chatter look like a release when a bio contains "release" or "EP".
+        # X 페이지는 게시물과 프로필 소개를 함께 반복합니다. 소개에 "release"나
+        # "EP"가 있으면 일반 대화가 발매 공지처럼 분류될 수 있어 이를 제거합니다.
         if hostname in {"x.com", "www.x.com", "twitter.com", "www.twitter.com"}:
             continue
         urls.append(url)

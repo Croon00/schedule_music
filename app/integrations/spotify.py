@@ -240,8 +240,8 @@ async def get_album_detail(album_id: str) -> SpotifyAlbumDetail:
     try:
         translations = await resolve_korean_track_titles([(track.id, track.name) for track in tracks])
     except Exception:
-        # A title translation failure must not prevent the Spotify album itself
-        # from opening; untranslated names remain visible.
+        # 제목 번역 실패가 Spotify 앨범 조회 자체를 막으면 안 됩니다.
+        # 번역하지 못한 이름은 원문 그대로 표시합니다.
         translations = {}
     tracks = [track.model_copy(update={"name_ko": translations.get(track.id)}) for track in tracks]
     return SpotifyAlbumDetail(**summary.model_dump(), tracks=tracks)

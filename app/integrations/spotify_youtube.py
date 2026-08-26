@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import settings
-from app.core.db import get_connection
+from app.repositories.song_links import existing_spotify_track_ids, save_spotify_youtube_link
 from app.integrations.spotify import SpotifyDiscographyTrack, get_artist_discography_tracks
 from app.integrations.youtube_context import (
     YOUTUBE_API_BASE_URL,
@@ -78,14 +78,7 @@ async def _find_youtube_match(
 
 
 def _existing_track_ids(track_ids: list[str]) -> set[str]:
-    if not track_ids:
-        return set()
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT spotify_track_id FROM songs WHERE spotify_track_id = ANY(%s)",
-            (track_ids,),
-        ).fetchall()
-    return {str(row["spotify_track_id"]) for row in rows if row["spotify_track_id"]}
+    return existing_spotify_track_ids(track_ids)
 
 
 def _save_link(
@@ -98,27 +91,7 @@ def _save_link(
     arranger: str | None = None,
 ) -> None:
     """Save only a confirmed automatic video link; lyrics are never created here."""
-    artist_name = ", ".join(track.artists)
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO songs (
-                discord_user_id, original_title, artist_name, album_name,
-                youtube_url, youtube_video_id, spotify_track_id, lyricist, composer, arranger
-            ) VALUES ('web', %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (discord_user_id, youtube_video_id) DO UPDATE
-            SET original_title = EXCLUDED.original_title,
-                artist_name = EXCLUDED.artist_name,
-                album_name = EXCLUDED.album_name,
-                spotify_track_id = EXCLUDED.spotify_track_id,
-                lyricist = EXCLUDED.lyricist,
-                composer = EXCLUDED.composer,
-                arranger = EXCLUDED.arranger,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (track.name, artist_name, track.album_name, youtube_url, video_id, track.id, lyricist, composer, arranger),
-        )
-        conn.commit()
+    save_spotify_youtube_link(track_id=track.id, title=track.name, artist_name=", ".join(track.artists), album_name=track.album_name, video_id=video_id, youtube_url=youtube_url, lyricist=lyricist, composer=composer, arranger=arranger)
 
 
 async def auto_link_spotify_artist_youtube(spotify_artist_id: str) -> YouTubeAutoLinkResult:

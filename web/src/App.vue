@@ -11,7 +11,6 @@ const navigation = [
   { to: '/music', label: 'Spotify 음악', icon: '♫' },
   { to: '/lyrics', label: '가사 등록', icon: '文' },
   { to: '/youtube-lives', label: 'YouTube 우타와꾸', icon: 'YT' },
-  { to: '/wiki', label: 'Wiki Studio', icon: '✦' },
   { to: '/settings', label: '연동 설정', icon: '⚙' },
 ]
 </script>

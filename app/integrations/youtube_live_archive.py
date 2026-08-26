@@ -210,9 +210,8 @@ async def add_youtube_live_url(
     try:
         context = await fetch_setlist_comment(video_id)
     except httpx.HTTPStatusError as exc:
-        # Comments can be disabled for an otherwise public archive.  Preserve
-        # its date and video link as a pending record instead of failing an
-        # entire channel backfill.
+        # 공개 archive라도 댓글이 비활성화될 수 있습니다. 채널 backfill 전체를
+        # 실패시키는 대신 날짜와 영상 링크를 대기 기록으로 보존합니다.
         logger.info("Comments unavailable for YouTube video %s: %s", video_id, exc.response.status_code)
         context = None
     comment = context.text if context else None
@@ -438,7 +437,7 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
         ).fetchall()
     if not rows:
         return
-    # Recover artist credits from the raw setlist when available.
+    # 원본 세트리스트에 크레딧이 있으면 아티스트 정보를 복구합니다.
     with get_connection() as conn:
         raw_setlist = conn.execute(
             "SELECT setlist FROM youtube_live_archives WHERE id = %s", (archive_id,)

@@ -12,9 +12,9 @@ from psycopg.rows import dict_row
 from app.core.config import settings
 
 
-# Official X accounts confirmed from RK Music's artist and release pages.
-# These are system-owned sources: Discord routes can deliver them to any guild,
-# while they are intentionally not tied to a person's Google Calendar.
+# RK Music 아티스트·발매 페이지에서 확인한 공식 X 계정입니다.
+# 시스템 소유 source이므로 Discord route는 어느 길드에나 전달할 수 있지만,
+# 특정 개인의 Google Calendar에는 의도적으로 연결하지 않습니다.
 RK_MUSIC_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("RK Music", "RKMusic_inc"),
     ("HACHI", "8HaChi_hacchi"),
@@ -79,7 +79,7 @@ VTUBER_X_SOURCES: tuple[tuple[str, str], ...] = (
 )
 VTUBER_SYSTEM_USER_ID = "system:vtuber-sources"
 
-# Official member accounts linked from KAMITSUBAKI STUDIO's V.W.P artist pages.
+# KAMITSUBAKI STUDIO의 V.W.P 아티스트 페이지에 연결된 공식 멤버 계정입니다.
 VWP_X_SOURCES: tuple[tuple[str, str], ...] = (
     ("花譜", "virtual_kaf"),
     ("理芽", "RIM_virtual"),
@@ -114,8 +114,8 @@ def get_connection() -> Connection:
 def _seed_rkmusic_x_sources(conn: Connection) -> None:
     """Insert the curated RK Music X sources without duplicating user data."""
     for artist_name, x_username in RK_MUSIC_X_SOURCES:
-        # Preserve the canonical Latin artist name when older source presets
-        # contain a legacy garbled display label.
+        # 오래된 source preset에 깨진 표시 이름이 있어도 표준 영문 아티스트명은
+        # 보존합니다.
         if x_username == "Mikage_0916":
             artist_name = "MIKAGE"
         artist = conn.execute(
@@ -558,8 +558,8 @@ def init_db() -> None:
             )
             """
         )
-        # Routes used to be split by classification. Collapse them to one
-        # source/channel connection so every new post follows the same route.
+        # route가 예전에는 분류별로 나뉘어 있었습니다. 모든 새 게시물이 같은
+        # source/channel 연결을 따르도록 하나로 통합합니다.
         conn.execute(
             """
             DELETE FROM notification_routes newer

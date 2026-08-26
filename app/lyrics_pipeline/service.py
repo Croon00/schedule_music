@@ -13,7 +13,6 @@ from app.lyrics_pipeline.models import (
     LyricsInput,
     LyricsSourceType,
     LyricsTransform,
-    NamuWikiRender,
     RawLyrics,
 )
 from app.lyrics_pipeline.youtube import extract_youtube_video_id
@@ -71,27 +70,6 @@ class LyricsPipeline:
             pronunciation_ko=pronunciation_ko,
             source_type=raw.source_type,
             needs_review=raw.needs_review,
-        )
-
-    async def render_namuwiki(
-        self,
-        *,
-        payload: LyricsInput,
-        format_example: str,
-    ) -> NamuWikiRender:
-        transformed = await self.transform(payload)
-        text = await self.ai_client.render_namuwiki(
-            original=transformed.original,
-            translation_ko=transformed.translation_ko,
-            pronunciation_ko=transformed.pronunciation_ko,
-            format_example=format_example,
-            artist=payload.artist,
-            title=payload.title,
-        )
-        return NamuWikiRender(
-            text=text,
-            source_type=transformed.source_type,
-            needs_review=transformed.needs_review,
         )
 
     async def save_transform(

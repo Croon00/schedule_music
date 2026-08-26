@@ -196,8 +196,8 @@ async def fetch_setlist_comment(video_id: str, max_pages: int = 3) -> YouTubeCon
         )
 
     best = max(candidates, key=timestamp_line_count, default="")
-    # A lone timestamp is usually a reaction such as "33:06 88888" rather
-    # than a setlist. Require repeated timestamped rows in one comment.
+    # 단독 타임스탬프는 세트리스트보다 "33:06 88888" 같은 반응인 경우가 많습니다.
+    # 한 댓글 안에 시간 정보가 있는 줄이 반복될 때만 세트리스트로 취급합니다.
     if not best or timestamp_line_count(best) < 2:
         return None
     return YouTubeContextText(source="setlist_comment", text=best)
