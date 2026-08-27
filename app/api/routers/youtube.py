@@ -1,13 +1,79 @@
-"""YouTube live archive and performance endpoints."""
-from fastapi import APIRouter, status
+"""YouTube 라이브·공연 API 라우터다."""
 
-from app.api import main as handlers
+import asyncio
+from typing import Annotated
 
-router = APIRouter(tags=["youtube"])
-router.add_api_route("/youtube-lives", handlers.create_youtube_live, methods=["POST"], status_code=status.HTTP_201_CREATED)
-router.add_api_route("/youtube-lives/backfills", handlers.create_youtube_live_backfill, methods=["POST"], status_code=status.HTTP_202_ACCEPTED)
-router.add_api_route("/youtube-lives", handlers.get_youtube_lives, methods=["GET"])
-router.add_api_route("/youtube-lives/{archive_id}", handlers.get_youtube_live, methods=["GET"])
-router.add_api_route("/youtube-performances", handlers.search_youtube_performances, methods=["GET"])
-router.add_api_route("/youtube-performance-filters", handlers.get_youtube_performance_filters, methods=["GET"])
-router.add_api_route("/youtube-performances/{performance_id}", handlers.patch_youtube_performance, methods=["PATCH"])
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from app.api.dependencies import get_youtube_service
+from app.core.models import YouTubePerformanceUpdate
+from app.core.security import require_api_key
+from app.schemas.youtube import YouTubeChannelBackfillCreate, YouTubeLiveCreate
+from app.services.youtube_service import YouTubeService
+
+router = APIRouter(tags=["youtube"], dependencies=[Depends(require_api_key)])
+Service = Annotated[YouTubeService, Depends(get_youtube_service)]
+_backfill_tasks: set[asyncio.Task] = set()
+
+
+@router.post("/youtube-lives", status_code=status.HTTP_201_CREATED)
+async def create_youtube_live(payload: YouTubeLiveCreate, service: Service) -> dict:
+    """YouTube 라이브를 등록한다."""
+    try:
+        archive = await service.create_live(str(payload.youtube_url), payload.artist_name)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="YouTube 정보를 가져오지 못했습니다.") from exc
+    if archive is None:
+        raise HTTPException(status_code=404, detail="YouTube 라이브 기록을 찾지 못했습니다.")
+    return archive
+
+
+@router.post("/youtube-lives/backfills", status_code=status.HTTP_202_ACCEPTED)
+async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate, service: Service) -> dict[str, str]:
+    """채널 과거 라이브 수집 작업을 백그라운드로 시작한다."""
+    task = asyncio.create_task(asyncio.to_thread(service.backfill_channel, str(payload.channel_url), payload.artist_name))
+    _backfill_tasks.add(task)
+    task.add_done_callback(_backfill_tasks.discard)
+    return {"status": "accepted"}
+
+
+@router.get("/youtube-lives")
+def get_youtube_lives(service: Service, limit: int = 50, artist_name: str | None = None) -> list[dict]:
+    """저장된 YouTube 라이브를 조회한다."""
+    return service.list_lives(limit, artist_name)
+
+
+@router.get("/youtube-lives/{archive_id}")
+async def get_youtube_live(archive_id: int, service: Service) -> dict:
+    """YouTube 라이브 상세 정보를 조회한다."""
+    archive = await service.get_live(archive_id)
+    if archive is None:
+        raise HTTPException(status_code=404, detail="YouTube 라이브 기록을 찾지 못했습니다.")
+    return archive
+
+
+@router.get("/youtube-performances")
+def search_youtube_performances(service: Service, artist_name: list[str] = Query(default=[]), song_title: list[str] = Query(default=[]), original_artist: list[str] = Query(default=[]), limit: int = 200) -> list[dict]:
+    """YouTube 공연 곡을 조건으로 검색한다."""
+    try:
+        return service.search_performances(artist_names=artist_name, song_titles=song_title, original_artists=original_artist, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/youtube-performance-filters")
+def get_youtube_performance_filters(service: Service) -> dict[str, list[str]]:
+    """공연 검색 필터를 조회한다."""
+    return service.list_performance_filters()
+
+
+@router.patch("/youtube-performances/{performance_id}")
+def patch_youtube_performance(performance_id: int, payload: YouTubePerformanceUpdate, service: Service) -> dict:
+    """공연 곡 정보를 수정한다."""
+    try:
+        updated = service.update_performance(performance_id, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="공연 기록을 찾지 못했습니다.")
+    return updated
