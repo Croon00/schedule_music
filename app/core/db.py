@@ -571,6 +571,24 @@ def init_db() -> None:
             """
         )
         conn.execute("UPDATE notification_routes SET item_type = 'all' WHERE item_type <> 'all'")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_deliveries (
+                id SERIAL PRIMARY KEY,
+                notification_route_id INTEGER NOT NULL,
+                source_item_id INTEGER NOT NULL,
+                discord_message_id TEXT,
+                delivered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (notification_route_id) REFERENCES notification_routes(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_item_id) REFERENCES source_items(id) ON DELETE CASCADE,
+                UNIQUE (notification_route_id, source_item_id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS notification_deliveries_route_item_idx "
+            "ON notification_deliveries (notification_route_id, source_item_id)"
+        )
         _seed_rkmusic_x_sources(conn)
         _seed_artist_x_sources(
             conn,

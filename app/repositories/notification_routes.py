@@ -70,6 +70,49 @@ def find_notification_routes_for_item(*, source_id: int) -> list[dict]:
     return _select("r.is_active = TRUE AND (r.source_id = %s OR r.source_id IS NULL)", [source_id])
 
 
+def record_notification_delivery(*, route_id: int, source_item_id: int, discord_message_id: str | None) -> bool:
+    """Persist one successful Discord delivery so retries are idempotent."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO notification_deliveries (
+                notification_route_id, source_item_id, discord_message_id
+            ) VALUES (%s, %s, %s)
+            ON CONFLICT (notification_route_id, source_item_id) DO NOTHING
+            RETURNING id
+            """,
+            (route_id, source_item_id, discord_message_id),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+
+def list_undelivered_items_for_route(*, route_id: int, limit: int) -> list[dict]:
+    """Return recent stored items created after a route existed but never delivered to it."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT si.id AS source_item_id, si.external_id, si.url, si.raw_text, si.item_type,
+                   si.published_at, s.value AS source_value, a.name AS artist_name
+            FROM notification_routes r
+            JOIN artist_sources s ON s.id = r.source_id
+            JOIN artists a ON a.id = s.artist_id
+            JOIN source_items si ON si.source_id = s.id
+            WHERE r.id = %s
+              AND r.is_active = TRUE
+              AND si.created_at >= r.created_at
+              AND NOT EXISTS (
+                  SELECT 1 FROM notification_deliveries d
+                  WHERE d.notification_route_id = r.id AND d.source_item_id = si.id
+              )
+            ORDER BY COALESCE(si.published_at, si.created_at) DESC
+            LIMIT %s
+            """,
+            (route_id, limit),
+        ).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
 def update_source_item_classification(*, source_item_id: int, item_type: str, confidence: float | None) -> None:
     """수집 원문의 AI 분류 결과와 신뢰도를 저장한다."""
     with get_connection() as conn: conn.execute("UPDATE source_items SET item_type = %s, classification_confidence = %s WHERE id = %s", (normalize_item_type(item_type), confidence, source_item_id)); conn.commit()

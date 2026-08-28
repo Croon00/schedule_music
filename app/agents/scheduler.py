@@ -18,6 +18,7 @@ from app.integrations.google_calendar import (
 )
 from app.integrations.notifications import (
     find_notification_routes_for_item,
+    record_notification_delivery,
     update_source_item_classification,
 )
 from app.integrations.web_pages import fetch_public_page_text
@@ -144,6 +145,7 @@ async def _process_x_source(source: dict[str, Any]) -> dict[str, int]:
         notification_result = await _notify_discord_routes(
             source=source,
             post=post,
+            source_item_id=source_item_id,
             item_type=item_type,
             classification_reason=None,
             event=None,
@@ -307,6 +309,7 @@ async def _notify_discord_routes(
     *,
     source: dict[str, Any],
     post: dict[str, Any],
+    source_item_id: int | None = None,
     item_type: str,
     classification_reason: str | None,
     event: dict[str, Any] | None,
@@ -345,7 +348,13 @@ async def _notify_discord_routes(
             skipped += 1
             continue
         try:
-            await channel.send(message)
+            discord_message = await channel.send(message)
+            if source_item_id is not None:
+                record_notification_delivery(
+                    route_id=int(route["id"]),
+                    source_item_id=source_item_id,
+                    discord_message_id=str(discord_message.id),
+                )
             sent += 1
         except Exception:
             skipped += 1

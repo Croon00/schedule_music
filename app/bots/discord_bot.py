@@ -25,8 +25,11 @@ from app.integrations.notifications import (
     delete_notification_route,
     get_notification_route,
     list_notification_routes,
+    list_undelivered_items_for_route,
+    record_notification_delivery,
     set_source_active_for_user,
 )
+from app.integrations.x_client import fetch_recent_posts, post_url
 from app.integrations.spotify import SpotifyTrackInfo, search_spotify_track, spotify_configured
 from app.integrations.youtube_context import (
     extract_lyrics_candidate,
@@ -1204,6 +1207,110 @@ async def route_test(interaction: discord.Interaction, route_id: int) -> None:
         return
 
     await interaction.followup.send("테스트 메시지를 전송했습니다.", ephemeral=True)
+
+
+def _get_x_source_for_diagnostic(*, source_id: int, discord_user_id: str) -> dict:
+    """Load one permitted X source without changing its polling cursor."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT s.id, s.value AS x_username, s.external_user_id,
+                   s.last_seen_external_id, a.name AS artist_name
+            FROM artist_sources s
+            JOIN artists a ON a.id = s.artist_id
+            WHERE s.id = %s AND s.source_type = 'x'
+              AND (a.discord_user_id = %s OR a.discord_user_id LIKE 'system:%%')
+            """,
+            (source_id, discord_user_id),
+        ).fetchone()
+    source = row_to_dict(row)
+    if source is None:
+        raise LookupError(f"X source #{source_id} was not found or is not permitted.")
+    if not source["external_user_id"]:
+        raise ValueError(f"X source #{source_id} has no resolved X user ID yet.")
+    return source
+
+
+@bot.tree.command(name="source_test", description="현재 X provider로 새 글을 조회하고 route에 테스트 전송합니다.")
+@app_commands.describe(source_id="/source_list에서 확인한 X source ID")
+async def source_test(interaction: discord.Interaction, source_id: int) -> None:
+    """Exercise Railway's configured X provider without advancing the DB cursor."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        guild_id = _guild_id_from_interaction(interaction)
+        source = _get_x_source_for_diagnostic(source_id=source_id, discord_user_id=str(interaction.user.id))
+        routes = list_notification_routes(guild_id=guild_id, source_id=source_id)
+        if not routes:
+            await interaction.followup.send("이 source에는 현재 서버 route가 없습니다.", ephemeral=True)
+            return
+        posts = await fetch_recent_posts(source["external_user_id"], source["last_seen_external_id"])
+    except (PermissionError, LookupError, ValueError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("source_test failed for source %s.", source_id)
+        await interaction.followup.send(f"X 조회에 실패했습니다: {exc}", ephemeral=True)
+        return
+
+    if not posts:
+        await interaction.followup.send("현재 cursor 이후의 새 X 글이 없습니다. DB cursor는 변경하지 않았습니다.", ephemeral=True)
+        return
+
+    latest = max(posts, key=lambda post: int(post["id"]))
+    message = f"[Source 수집 테스트] {source['artist_name']} 최신 X 글\n{post_url(source['x_username'], latest['id'])}"
+    sent = 0
+    unavailable = 0
+    for route in routes:
+        channel = bot.get_channel(int(route["discord_channel_id"]))
+        if channel is None or not hasattr(channel, "send"):
+            unavailable += 1
+            continue
+        await channel.send(message)
+        sent += 1
+    suffix = f", 채널 미접근 {unavailable}곳" if unavailable else ""
+    await interaction.followup.send(
+        f"X 조회 성공: 새 글 {len(posts)}건 중 최신 1건을 route {sent}곳에 전송했습니다{suffix}. DB cursor는 변경하지 않았습니다.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="route_replay", description="DB에 있지만 전송 기록이 없는 최근 X 글을 route에 재전송합니다.")
+@app_commands.describe(route_id="/route_list에서 확인한 route ID", limit="최근 글부터 재전송할 최대 건수 (1~20, 기본 5)")
+async def route_replay(interaction: discord.Interaction, route_id: int, limit: app_commands.Range[int, 1, 20] = 5) -> None:
+    """Replay stored-but-undelivered source items to one route, with durable deduplication."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        _ensure_manage_guild(interaction)
+        guild_id = _guild_id_from_interaction(interaction)
+        route = get_notification_route(guild_id=guild_id, route_id=route_id)
+        channel = bot.get_channel(int(route["discord_channel_id"]))
+        if channel is None or not hasattr(channel, "send"):
+            await interaction.followup.send("채널을 찾을 수 없습니다. 봇 권한과 채널 설정을 확인해주세요.", ephemeral=True)
+            return
+        items = list_undelivered_items_for_route(route_id=route_id, limit=limit)
+    except (PermissionError, ValueError, NotificationRouteNotFoundError) as exc:
+        await interaction.followup.send(str(exc), ephemeral=True)
+        return
+    except Exception as exc:
+        logger.exception("route_replay failed for route %s.", route_id)
+        await interaction.followup.send(f"재전송 목록을 준비하지 못했습니다: {exc}", ephemeral=True)
+        return
+
+    sent = 0
+    for item in items:
+        item_url = item["url"] or post_url(item["source_value"], item["external_id"])
+        try:
+            discord_message = await channel.send(f"[누락 글 재전송] {item['artist_name']}\n{item_url}")
+            record_notification_delivery(route_id=route_id, source_item_id=int(item["source_item_id"]), discord_message_id=str(discord_message.id))
+            sent += 1
+        except Exception:
+            logger.exception("route_replay delivery failed for route %s, source item %s.", route_id, item["source_item_id"])
+
+    await interaction.followup.send(
+        f"route #{route_id}: 후보 {len(items)}건 중 {sent}건을 재전송했습니다. 성공한 글은 다음 재전송에서 제외됩니다.",
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="google_connect", description="Google Calendar를 연결합니다.")
