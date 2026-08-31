@@ -47,7 +47,14 @@ class Settings(BaseSettings):
     spotify_client_id: str | None = None
     spotify_client_secret: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # Some integrations (for example twscrape's TWS_HTTP_BACKEND) read their
+    # own environment variables directly. They must not prevent app settings
+    # from loading when present in a local dotenv file.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @field_validator(
         "discord_bot_token",
