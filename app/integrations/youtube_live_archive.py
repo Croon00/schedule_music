@@ -465,7 +465,7 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
 def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) -> list[dict[str, Any]]:
     """Return recent YouTube live archives with artist and X-post context."""
     with get_connection() as conn:
-        return conn.execute(
+        archives = conn.execute(
             """
             SELECT
                 y.id,
@@ -488,6 +488,26 @@ def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) 
             """,
             (artist_name, artist_name, limit),
         ).fetchall()
+        if not archives:
+            return archives
+        archive_ids = [archive["id"] for archive in archives]
+        performances = conn.execute(
+            """
+            SELECT id, archive_id, performed_on, start_seconds, timestamp_text, song_title,
+                   song_title_ko, original_artist, original_artist_ko, tj_number, ky_number,
+                   karaoke_checked_at
+            FROM youtube_song_performances
+            WHERE archive_id = ANY(%s)
+            ORDER BY archive_id, start_seconds, id
+            """,
+            (archive_ids,),
+        ).fetchall()
+    by_archive_id: dict[int, list[dict[str, Any]]] = {}
+    for performance in performances:
+        by_archive_id.setdefault(performance["archive_id"], []).append(performance)
+    for archive in archives:
+        archive["performances"] = by_archive_id.get(archive["id"], [])
+    return archives
 
 
 def get_youtube_live_archive(archive_id: int) -> dict[str, Any] | None:

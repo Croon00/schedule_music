@@ -7,6 +7,15 @@ import type { Artist, YouTubeLiveArchive, YouTubePerformance, YouTubePerformance
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
+type SongStatOccurrence = {
+  archiveId: number; youtubeUrl: string; videoTitle: string | null
+  broadcastAt: string | null; publishedAt: string | null; startSeconds: number; timestampText: string
+}
+type SongStat = {
+  title: string; titleKo: string | null; originalArtist: string | null; originalArtistKo: string | null
+  count: number; occurrences: SongStatOccurrence[]
+}
+
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +31,9 @@ const songQuery = ref('')
 const statsSort = ref<'asc' | 'desc'>('asc')
 const registrationOpen = ref(false)
 const detailOpen = ref(false)
+const statsDetailOpen = ref(false)
+const selectedStatSong = ref<SongStat | null>(null)
+const selectedStatOccurrence = ref<SongStatOccurrence | null>(null)
 const selectedId = ref<number | null>(null)
 const playerStartSeconds = ref(0)
 const playerNonce = ref(0)
@@ -97,7 +109,35 @@ function normalizeSongTitle(value: string): string {
     .replace(/\s*[（(［\[]\s*(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*[）)］\]]\s*$/iu, '')
     .replace(/\s*(?:[-\u2013\u2014|\uff5c/\uff0f:\uff1a]\s*|\s+)(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*$/iu, '')
 
-  return title.trim()
+  return stripSetlistAttribution(title).trim()
+}
+
+const PERFORMANCE_NOTE = /(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|\u30d4\u30a2\u30ce|\u30ae\u30bf\u30fc|acoustic|live|\u97f3\u6e90|inst(?:rumental)?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)/iu
+const JAPANESE_TEXT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u
+
+function stripSetlistAttribution(value: string): string {
+  let title = value
+
+  // Drop a trailing performance note, but never parentheses that are part of
+  // the actual title unless they clearly describe a cover/arrangement.
+  while (true) {
+    const match = title.match(/\s*[\uff08(]\s*([^\uff09)]{1,80})\s*[\uff09)]\s*$/u)
+    if (!match || !PERFORMANCE_NOTE.test(match[1])) break
+    title = title.slice(0, match.index).trim()
+  }
+
+  // Setlists frequently append the original artist or singer after a slash.
+  // Strip it when it is explicitly a performance label, or when a Latin title
+  // has a Japanese credit (for example, `rain stops, good-bye / \u306b\u304aP`).
+  const slashMatch = title.match(/^(?<song>.+?)\s*[/\uff0f|\uff5c]\s*(?<credit>[^/\uff0f|\uff5c]{1,40})$/u)
+  if (slashMatch?.groups) {
+    const { song, credit } = slashMatch.groups
+    if (PERFORMANCE_NOTE.test(credit) || (/[A-Za-z]/u.test(song) && JAPANESE_TEXT.test(credit))) {
+      title = song.trim()
+    }
+  }
+
+  return title
 }
 
 function songStatsKey(title: string): string {
@@ -115,19 +155,53 @@ function cleanSongTitle(value: string): string | null {
   return withoutIndex && !/^start(?:\b|[：:\-])/i.test(withoutIndex) ? withoutIndex : null
 }
 const songStats = computed(() => {
-  const songs = new Map<string, { title: string; count: number }>()
+  const songs = new Map<string, SongStat>()
   for (const archive of archives.data.value ?? []) {
-    for (const entry of archive.setlist ?? []) {
+    const entries = archive.performances?.length
+      ? archive.performances.map((performance) => ({
+          title: performance.song_title,
+          titleKo: performance.song_title_ko,
+          originalArtist: performance.original_artist,
+          originalArtistKo: performance.original_artist_ko,
+          startSeconds: performance.start_seconds,
+          timestampText: performance.timestamp_text,
+        }))
+      : (archive.setlist ?? []).map((entry) => ({
+          title: entry.title, titleKo: null, originalArtist: null, originalArtistKo: null,
+          startSeconds: timestampToSeconds(entry.timestamp), timestampText: entry.timestamp,
+        }))
+    for (const entry of entries) {
       const title = cleanSongTitle(entry.title)
       if (!title) continue
       const key = songStatsKey(title)
       const song = songs.get(key)
       if (song) {
         song.count += 1
+        song.occurrences.push({
+          archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,
+          broadcastAt: archive.broadcast_at, publishedAt: archive.published_at,
+          startSeconds: entry.startSeconds, timestampText: entry.timestampText,
+        })
         // 같은 곡의 표기가 여러 개면, 보통 더 짧은 쪽이 주석이 덜 붙은 제목이다.
-        if (title.length < song.title.length) song.title = title
+        if (title.length < song.title.length) {
+          song.title = title
+          song.titleKo = entry.titleKo
+        }
+        song.originalArtist ||= entry.originalArtist
+        song.originalArtistKo ||= entry.originalArtistKo
       }
-      else songs.set(key, { title, count: 1 })
+      else songs.set(key, {
+        title,
+        titleKo: entry.titleKo,
+        originalArtist: entry.originalArtist,
+        originalArtistKo: entry.originalArtistKo,
+        count: 1,
+        occurrences: [{
+          archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,
+          broadcastAt: archive.broadcast_at, publishedAt: archive.published_at,
+          startSeconds: entry.startSeconds, timestampText: entry.timestampText,
+        }],
+      })
     }
   }
   const query = songQuery.value.trim().toLocaleLowerCase()
@@ -142,6 +216,7 @@ const updatePerformance = useMutation({
   onSuccess: async () => {
     editingPerformanceId.value = null
     await queryClient.invalidateQueries({ queryKey: ['youtube-live'] })
+    await queryClient.invalidateQueries({ queryKey: ['youtube-lives'] })
   },
 })
 
@@ -188,6 +263,23 @@ function submitSongSearch(): void {
   addSearchFilter('originalArtist')
   if (selectedSearchSongs.value.length) searchPerformances.mutate()
 }
+function timestampToSeconds(value: string): number {
+  const parts = value.split(':').map((part) => Number(part.trim()))
+  if (!parts.length || parts.some((part) => !Number.isFinite(part))) return 0
+  return parts.reduce((total, part) => total * 60 + part, 0)
+}
+function openSongStats(song: SongStat): void {
+  selectedStatSong.value = song
+  selectedStatOccurrence.value = null
+  statsDetailOpen.value = true
+}
+function playStatOccurrence(occurrence: SongStatOccurrence): void {
+  selectedStatOccurrence.value = occurrence
+}
+function displayOccurrenceDate(occurrence: SongStatOccurrence): string {
+  const value = occurrence.broadcastAt || occurrence.publishedAt
+  return value ? new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date(value)) : '날짜 미확인'
+}
 function pairedLabel(original: string | null, korean: string | null): string {
   return korean ? `${original || '미상'} (${korean})` : (original || '미상')
 }
@@ -218,7 +310,10 @@ function thumbnail(archive: YouTubeLiveArchive): string | undefined {
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : undefined
 }
 function youtubeEmbedUrl(archive: YouTubeLiveArchive, startSeconds = 0): string | undefined {
-  const id = youtubeVideoId(archive.youtube_url)
+  return youtubeEmbedUrlFromUrl(archive.youtube_url, startSeconds)
+}
+function youtubeEmbedUrlFromUrl(url: string, startSeconds = 0): string | undefined {
+  const id = youtubeVideoId(url)
   if (!id) return undefined
   const params = new URLSearchParams({ autoplay: '1', rel: '0' })
   if (startSeconds > 0) params.set('start', String(startSeconds))
@@ -360,8 +455,23 @@ function hideBrokenImage(event: Event): void {
       </div>
       <div v-if="archives.isPending.value" class="empty-state compact"><strong>곡 통계를 준비하고 있습니다.</strong></div>
       <div v-else-if="!songStats.length" class="empty-state compact"><strong>표시할 곡 통계가 없습니다.</strong></div>
-      <ol v-else class="song-stats__list"><li v-for="(song, index) in songStats" :key="song.title"><span>{{ index + 1 }}</span><strong>{{ song.title }}</strong><b>{{ song.count }}회</b></li></ol>
+      <ol v-else class="song-stats__list"><li v-for="(song, index) in songStats" :key="song.title"><span>{{ index + 1 }}</span><button type="button" class="song-stats__title" @click="openSongStats(song)"><strong>{{ pairedLabel(song.title, song.titleKo) }}</strong><small v-if="song.originalArtist">{{ pairedLabel(song.originalArtist, song.originalArtistKo) }}</small></button><b>{{ song.count }}회</b></li></ol>
     </section>
+
+    <AppModal :open="statsDetailOpen" :title="selectedStatSong ? pairedLabel(selectedStatSong.title, selectedStatSong.titleKo) : '곡 가창 기록'" :description="selectedStatSong ? `${selectedStatSong.count}회 가창 기록` : ''" @close="statsDetailOpen = false">
+      <div v-if="selectedStatSong" class="song-history">
+        <p v-if="selectedStatSong.originalArtist" class="song-history__artist">{{ pairedLabel(selectedStatSong.originalArtist, selectedStatSong.originalArtistKo) }}</p>
+        <div v-if="selectedStatOccurrence && youtubeEmbedUrlFromUrl(selectedStatOccurrence.youtubeUrl, selectedStatOccurrence.startSeconds)" class="video-player">
+          <iframe :key="`${selectedStatOccurrence.archiveId}-${selectedStatOccurrence.startSeconds}`" :src="youtubeEmbedUrlFromUrl(selectedStatOccurrence.youtubeUrl, selectedStatOccurrence.startSeconds)" :title="selectedStatOccurrence.videoTitle || selectedStatSong.title" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen />
+        </div>
+        <ol class="song-history__list">
+          <li v-for="occurrence in selectedStatSong.occurrences" :key="`${occurrence.archiveId}-${occurrence.startSeconds}`">
+            <span><strong>{{ displayOccurrenceDate(occurrence) }}</strong><small>{{ occurrence.videoTitle || 'YouTube Live' }}</small></span>
+            <UButton class="button button--ghost" @click="playStatOccurrence(occurrence)">{{ occurrence.timestampText }} 재생</UButton>
+          </li>
+        </ol>
+      </div>
+    </AppModal>
 
     <details v-if="false" class="panel performance-search-panel">
       <summary><span><b>전체 가창 기록 검색</b><small>아티스트 또는 곡 제목으로 모든 방송을 검색합니다.</small></span><em>열기</em></summary>
@@ -441,4 +551,5 @@ function hideBrokenImage(event: Event): void {
 .collection-toggle{align-self:start;padding:10px 16px;color:#8eeebc;border:1px solid rgba(77,230,168,.4);border-radius:8px;background:rgba(77,230,168,.07);font-size:13px;font-weight:800}.collection-toggle:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8;box-shadow:0 0 0 3px rgba(77,230,168,.14)}.song-stats{margin-top:22px}.song-stats__header{display:flex;align-items:end;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}.song-stats__header h2{margin:0}.song-stats__header p:last-child{margin:8px 0 0;color:#7a879a;font-size:13px}.song-stats__toolbar{display:flex;gap:10px;margin:18px 0}.song-stats__toolbar>*:first-child{flex:1}.song-sort{min-height:40px;padding:0 15px;color:#baf5ce;border:1px solid rgba(77,230,168,.35);background:rgba(77,230,168,.07);font-size:12px}.song-sort:hover{color:#061a10;border-color:#4de6a8;background:#4de6a8}.song-stats__list{display:grid;gap:4px;padding:0;margin:0;list-style:none}.song-stats__list li{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:14px;padding:14px 10px;border-bottom:1px solid var(--line)}.song-stats__list li>span{color:#66758a;font:700 12px ui-monospace,monospace}.song-stats__list strong{overflow:hidden;color:#dce7f5;font-size:15px;text-overflow:ellipsis;white-space:nowrap}.song-stats__list b{padding:5px 9px;border-radius:999px;color:#9cf1c5;background:rgba(77,230,168,.1);font-size:12px}@media(max-width:700px){.youtube-artist-hero{grid-template-columns:88px minmax(0,1fr)}.collection-toggle{grid-column:1/-1;justify-self:stretch}.song-stats__header{align-items:start;flex-direction:column}.song-stats__toolbar{flex-direction:column}.song-sort{width:100%}}
 .video-player{aspect-ratio:16/9;overflow:hidden;margin-bottom:18px;border-radius:9px;background:#0a1019}.video-player iframe{display:block;width:100%;height:100%;border:0}
 .live-detail .video-player{height:min(48vh,560px);min-height:320px;margin:0;aspect-ratio:auto}.live-detail .setlist-list{max-height:none;overflow:visible;padding:0 12px;border:0;border-radius:0;background:transparent}.setlist-scroll{max-height:26vh;overflow-y:auto;border:1px solid rgba(50,214,255,.2);border-radius:9px;background:linear-gradient(90deg,rgba(50,214,255,.035),rgba(255,255,255,.015));scrollbar-color:#30c7e8 rgba(50,214,255,.05);scrollbar-width:thin}.setlist-scroll::-webkit-scrollbar{width:10px}.setlist-scroll::-webkit-scrollbar-track{margin:7px 2px;border-radius:999px;background:rgba(50,214,255,.05)}.setlist-scroll::-webkit-scrollbar-thumb{border:2px solid #111927;border-radius:999px;background:linear-gradient(#6be6ff,#2baed4)}.setlist-scroll::-webkit-scrollbar-thumb:hover{background:linear-gradient(#a2f1ff,#40c8eb)}:global(.modal.modal--youtube-detail){overflow:hidden}@media(max-width:700px){.live-detail .video-player{height:auto;min-height:0;aspect-ratio:16/9}.setlist-scroll{max-height:30vh}.live-detail .setlist-list{padding:0 8px}}
+.song-stats__title{display:grid;gap:4px;min-width:0;padding:0;border:0;color:inherit;background:transparent;text-align:left;cursor:pointer}.song-stats__title:hover strong{color:var(--cyan)}.song-stats__title small,.song-history__artist{color:#718096;font-size:11px}.song-history{display:grid;gap:14px}.song-history__artist{margin:0}.song-history__list{display:grid;gap:7px;padding:0;margin:0;list-style:none}.song-history__list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.song-history__list span{display:grid;gap:4px;min-width:0}.song-history__list small{overflow:hidden;color:#718096;text-overflow:ellipsis;white-space:nowrap}.song-history__list .button{flex:0 0 auto}
 </style>

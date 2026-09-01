@@ -504,6 +504,24 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS karaoke_source_matches (
+                id SERIAL PRIMARY KEY,
+                song_title TEXT NOT NULL,
+                artist_name TEXT,
+                tj_number TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (source_name, song_title, artist_name, tj_number)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS karaoke_source_matches_title_idx "
+            "ON karaoke_source_matches (song_title)"
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS youtube_channel_monitors (
                 id SERIAL PRIMARY KEY,
                 discord_user_id TEXT NOT NULL,
