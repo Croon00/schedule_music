@@ -317,6 +317,8 @@ def init_db() -> None:
             "ALTER TABLE artists ADD COLUMN IF NOT EXISTS artist_kind TEXT NOT NULL DEFAULT 'vtuber'"
         )
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS agency TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS profile_intro TEXT")
+        conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS debut_date TEXT")
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_spotify BOOLEAN NOT NULL DEFAULT TRUE")
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_lyrics BOOLEAN NOT NULL DEFAULT TRUE")
         conn.execute("ALTER TABLE artists ADD COLUMN IF NOT EXISTS show_in_youtube_lives BOOLEAN NOT NULL DEFAULT TRUE")
@@ -368,6 +370,9 @@ def init_db() -> None:
         conn.execute("ALTER TABLE artist_sources ADD COLUMN IF NOT EXISTS last_seen_external_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS discord_user_id TEXT")
         conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS ticket_closes_at TEXT")
+        conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS capacity_text TEXT")
+        conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS setlist_json TEXT")
+        conn.execute("ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS merchandise_json TEXT")
         conn.execute(
             "ALTER TABLE event_candidates ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'live_event'"
         )

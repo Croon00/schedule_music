@@ -19,6 +19,8 @@ class ArtistModel(TimestampMixin, Base):
     artist_kind: Mapped[str] = mapped_column(Text, default="vtuber")
     agency: Mapped[str] = mapped_column(Text, nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
+    profile_intro: Mapped[str] = mapped_column(Text, nullable=True)
+    debut_date: Mapped[str] = mapped_column(Text, nullable=True)
     show_in_spotify: Mapped[bool] = mapped_column(Boolean, default=True)
     show_in_lyrics: Mapped[bool] = mapped_column(Boolean, default=True)
     show_in_youtube_lives: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -19,6 +19,8 @@ const artistForm = reactive({
   agency: '',
   x_username: '',
   notes: '',
+  profile_intro: '',
+  debut_date: '',
 })
 const sourceForm = reactive({
   source_type: 'x' as SourceType,
@@ -40,6 +42,8 @@ const createArtist = useMutation({
       agency: '',
       x_username: '',
       notes: '',
+      profile_intro: '',
+      debut_date: '',
     })
     feedback.value = '아티스트를 등록했습니다.'
   },
@@ -98,6 +102,8 @@ function submitArtist(): void {
     agency: artistForm.agency || undefined,
     x_username: artistForm.x_username || undefined,
     notes: artistForm.notes || undefined,
+    profile_intro: artistForm.profile_intro || undefined,
+    debut_date: artistForm.debut_date || undefined,
   })
 }
 
@@ -192,6 +198,8 @@ function sourceLabel(type: SourceType): string {
         <label v-if="artistForm.artist_kind === 'vtuber'">소속<UInput v-model="artistForm.agency" maxlength="120" placeholder="예: RK Music" /></label>
         <label class="form-grid__wide">X 사용자명<UInput v-model="artistForm.x_username" placeholder="@HACHI_08" /></label>
         <label class="form-grid__wide">메모<UTextarea v-model="artistForm.notes" rows="3" placeholder="레이블, 활동 그룹 등 운영 메모" /></label>
+        <label>데뷔일<UInput v-model="artistForm.debut_date" type="date" /></label>
+        <label class="form-grid__wide">소개글<UTextarea v-model="artistForm.profile_intro" rows="4" placeholder="아티스트 소개 페이지에 표시할 간단한 소개" /></label>
         <p v-if="createArtist.error.value" class="form-error">{{ createArtist.error.value.message }}</p>
         <div class="form-actions">
           <UButton type="button" class="button button--ghost" @click="artistModal = false">취소</UButton>

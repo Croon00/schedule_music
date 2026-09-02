@@ -81,6 +81,8 @@ export interface Artist {
   show_in_lyrics: boolean
   show_in_youtube_lives: boolean
   notes: string | null
+  profile_intro: string | null
+  debut_date: string | null
   spotify_image_url: string | null
   representative_youtube_url: string | null
   created_at: string
@@ -97,6 +99,8 @@ export interface ArtistCreate {
   show_in_lyrics?: boolean
   show_in_youtube_lives?: boolean
   notes?: string
+  profile_intro?: string
+  debut_date?: string
   x_username?: string
 }
 
@@ -120,6 +124,9 @@ export interface EventCandidate {
   ticket_closes_at: string | null
   ticket_url: string | null
   price_text: string | null
+  capacity_text: string | null
+  setlist_json: string | null
+  merchandise_json: string | null
   source_url: string | null
   raw_text: string | null
   status: CandidateStatus

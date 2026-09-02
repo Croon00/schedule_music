@@ -79,6 +79,7 @@ class ArtistService:
         return {
             "id": artist.id, "name": artist.name, "display_name": artist.display_name,
             "artist_kind": artist.artist_kind, "agency": artist.agency, "notes": artist.notes,
+            "profile_intro": artist.profile_intro, "debut_date": artist.debut_date,
             "show_in_spotify": artist.show_in_spotify, "show_in_lyrics": artist.show_in_lyrics,
             "show_in_youtube_lives": artist.show_in_youtube_lives,
             "spotify_image_url": artist.spotify_image_url,

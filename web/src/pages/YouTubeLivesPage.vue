@@ -14,6 +14,7 @@ type SongStatOccurrence = {
 type SongStat = {
   title: string; titleKo: string | null; originalArtist: string | null; originalArtistKo: string | null
   count: number; occurrences: SongStatOccurrence[]
+  artistCandidates: Record<string, { originalArtist: string; originalArtistKo: string | null; count: number }>
 }
 
 const queryClient = useQueryClient()
@@ -154,6 +155,14 @@ function cleanSongTitle(value: string): string | null {
   const withoutIndex = title.replace(/^(?:#\s*)?(?:제\s*)?\d+\s*(?:곡목?|曲目?)?\s*(?:[.．:：\-—)]\s*)+/u, '').trim()
   return withoutIndex && !/^start(?:\b|[：:\-])/i.test(withoutIndex) ? withoutIndex : null
 }
+function addSongStatArtistCandidate(song: SongStat, originalArtist: string | null, originalArtistKo: string | null): void {
+  if (!originalArtist) return
+  const key = songStatsKey(originalArtist)
+  if (!key) return
+  const candidate = song.artistCandidates[key]
+  if (candidate) candidate.count += 1
+  else song.artistCandidates[key] = { originalArtist, originalArtistKo, count: 1 }
+}
 const songStats = computed(() => {
   const songs = new Map<string, SongStat>()
   for (const archive of archives.data.value ?? []) {
@@ -187,25 +196,38 @@ const songStats = computed(() => {
           song.title = title
           song.titleKo = entry.titleKo
         }
-        song.originalArtist ||= entry.originalArtist
-        song.originalArtistKo ||= entry.originalArtistKo
+        addSongStatArtistCandidate(song, entry.originalArtist, entry.originalArtistKo)
       }
-      else songs.set(key, {
-        title,
-        titleKo: entry.titleKo,
-        originalArtist: entry.originalArtist,
-        originalArtistKo: entry.originalArtistKo,
-        count: 1,
-        occurrences: [{
+      else {
+        const song: SongStat = {
+          title,
+          titleKo: entry.titleKo,
+          originalArtist: entry.originalArtist,
+          originalArtistKo: entry.originalArtistKo,
+          count: 1,
+          occurrences: [{
           archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,
           broadcastAt: archive.broadcast_at, publishedAt: archive.published_at,
           startSeconds: entry.startSeconds, timestampText: entry.timestampText,
-        }],
-      })
+          }],
+          artistCandidates: {},
+        }
+        addSongStatArtistCandidate(song, entry.originalArtist, entry.originalArtistKo)
+        songs.set(key, song)
+      }
     }
   }
   const query = songQuery.value.trim().toLocaleLowerCase()
   return [...songs.values()]
+    .map((song) => {
+      const primaryArtist = Object.values(song.artistCandidates)
+        .sort((left, right) => right.count - left.count)[0]
+      if (primaryArtist) {
+        song.originalArtist = primaryArtist.originalArtist
+        song.originalArtistKo = primaryArtist.originalArtistKo
+      }
+      return song
+    })
     .filter((song) => !query || song.title.toLocaleLowerCase().includes(query))
     .sort((left, right) => statsSort.value === 'asc'
       ? left.count - right.count || left.title.localeCompare(right.title)

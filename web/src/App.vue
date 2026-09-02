@@ -7,6 +7,7 @@ const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInte
 const navigation = [
   { to: '/', label: '대시보드', icon: '⌁' },
   { to: '/artists', label: '아티스트 · 소스', icon: '◉' },
+  { to: '/profiles', label: 'Vsinger 소개', icon: '✦' },
   { to: '/events', label: '일정 후보', icon: '◇' },
   { to: '/music', label: 'Spotify 음악', icon: '♫' },
   { to: '/lyrics', label: '가사 등록', icon: '文' },

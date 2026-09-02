@@ -5,6 +5,9 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'dashboard', component: () => import('@/pages/DashboardPage.vue') },
     { path: '/artists', name: 'artists', component: () => import('@/pages/ArtistsPage.vue') },
+    { path: '/profiles', name: 'artist-profiles', component: () => import('@/pages/ArtistProfilesPage.vue') },
+    { path: '/profiles/:artistId', name: 'artist-profile', component: () => import('@/pages/ArtistProfilePage.vue') },
+    { path: '/profiles/:artistId/lives/:eventId', name: 'artist-live-detail', component: () => import('@/pages/ArtistLiveDetailPage.vue') },
     { path: '/events', name: 'events', component: () => import('@/pages/EventsPage.vue') },
     { path: '/music', name: 'music', component: () => import('@/pages/MusicLibraryPage.vue') },
     { path: '/music/artists/:artistId', name: 'music-artist', component: () => import('@/pages/ArtistDiscographyPage.vue') },

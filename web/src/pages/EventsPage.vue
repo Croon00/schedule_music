@@ -32,6 +32,7 @@ const eventsQuery = useQuery({
 const form = reactive({
   artist_id: '', event_type: 'live_event' as EventType, event_format: 'onsite' as EventFormat, title: '', starts_at: '', venue: '',
   ticket_opens_at: '', ticket_closes_at: '', ticket_url: '', source_url: '', price_text: '',
+  capacity_text: '', setlist_json: '', merchandise_json: '',
   raw_text: '', status: 'needs_review' as CandidateStatus,
 })
 
@@ -81,6 +82,7 @@ const createEvent = useMutation({
     Object.assign(form, {
       artist_id: '', event_type: 'live_event', event_format: 'onsite', title: '', starts_at: '', venue: '',
       ticket_opens_at: '', ticket_closes_at: '', ticket_url: '', source_url: '', price_text: '',
+      capacity_text: '', setlist_json: '', merchandise_json: '',
       raw_text: '', status: 'needs_review',
     })
   },
@@ -158,6 +160,9 @@ function submit(): void {
     ticket_url: optional(form.ticket_url),
     source_url: optional(form.source_url),
     price_text: optional(form.price_text),
+    capacity_text: optional(form.capacity_text),
+    setlist_json: optional(form.setlist_json),
+    merchandise_json: optional(form.merchandise_json),
     raw_text: optional(form.raw_text),
     status: form.status,
   })
@@ -293,7 +298,10 @@ const formatLabels: Record<EventFormat, string> = {
         <label class="form-grid__wide">티켓 URL<UInput v-model="form.ticket_url" type="url" /></label>
         <label class="form-grid__wide">원문 URL<UInput v-model="form.source_url" type="url" /></label>
         <label>가격 정보<UInput v-model="form.price_text" placeholder="¥7,500" /></label>
+        <label>수용 인원<UInput v-model="form.capacity_text" placeholder="예: 약 1,500명" /></label>
         <label>상태<USelect v-model="form.status" :items="eventStatusOptions" /></label>
+        <label class="form-grid__wide">셋리스트<UTextarea v-model="form.setlist_json" rows="4" placeholder="한 줄에 한 곡씩 입력하세요." /></label>
+        <label class="form-grid__wide">현장 굿즈<UTextarea v-model="form.merchandise_json" rows="3" placeholder="한 줄에 한 상품씩 입력하세요." /></label>
         <label class="form-grid__wide">원문 메모<UTextarea v-model="form.raw_text" rows="3" /></label>
         <p v-if="createEvent.error.value" class="form-error">{{ createEvent.error.value.message }}</p>
         <div class="form-actions"><UButton type="button" class="button button--ghost" @click="modalOpen = false">취소</UButton><UButton class="button button--primary" :disabled="createEvent.isPending.value">일정 저장</UButton></div>

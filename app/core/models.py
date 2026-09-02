@@ -96,6 +96,8 @@ class ArtistCreate(BaseModel):
     show_in_lyrics: bool = True
     show_in_youtube_lives: bool = True
     notes: str | None = None
+    profile_intro: str | None = None
+    debut_date: str | None = Field(default=None, max_length=20)
     x_username: str | None = Field(
         default=None,
         description="선택 X 핸들입니다. '@artist' 또는 'artist' 형식을 모두 허용합니다.",
@@ -122,6 +124,8 @@ class ArtistUpdate(BaseModel):
     show_in_lyrics: bool | None = None
     show_in_youtube_lives: bool | None = None
     notes: str | None = None
+    profile_intro: str | None = None
+    debut_date: str | None = Field(default=None, max_length=20)
 
 
 class Artist(BaseModel):
@@ -136,6 +140,8 @@ class Artist(BaseModel):
     show_in_lyrics: bool = True
     show_in_youtube_lives: bool = True
     notes: str | None
+    profile_intro: str | None = None
+    debut_date: str | None = None
     spotify_image_url: str | None = None
     representative_youtube_url: str | None = None
     created_at: datetime
@@ -190,6 +196,9 @@ class EventCandidateCreate(BaseModel):
     ticket_closes_at: str | None = None
     ticket_url: str | None = None
     price_text: str | None = None
+    capacity_text: str | None = Field(default=None, max_length=120)
+    setlist_json: str | None = None
+    merchandise_json: str | None = None
     source_url: str | None = None
     raw_text: str | None = None
     status: CandidateStatus = "needs_review"
