@@ -1,9 +1,46 @@
 import pytest
+import asyncio
+import httpx
+
+from app.integrations import youtube_channel_monitor as monitor
 
 from app.integrations.youtube_channel_monitor import (
     _channel_locator,
     _performer_for_singing_stream,
 )
+
+
+def test_channel_fetch_only_returns_completed_live_archives(monkeypatch) -> None:
+    start = "2026-08-01T10:00:00Z"
+    end = "2026-08-01T11:00:00Z"
+    videos = [
+        {"id": "archive", "liveStreamingDetails": {"actualStartTime": start, "actualEndTime": end}},
+        {"id": "short"},
+        {"id": "upload", "liveStreamingDetails": {}},
+        {"id": "upcoming", "liveStreamingDetails": {"scheduledStartTime": start}},
+        {"id": "live", "liveStreamingDetails": {"actualStartTime": start}},
+        {"id": "incomplete", "liveStreamingDetails": {"actualEndTime": end}},
+    ]
+    for video in videos:
+        video["snippet"] = {"title": "【歌枠】 " + video["id"]}
+
+    def respond(request):
+        if request.url.path.endswith("/playlistItems"):
+            return httpx.Response(200, json={"items": [
+                {"contentDetails": {"videoId": video["id"]}, "snippet": video["snippet"]}
+                for video in videos
+            ]})
+        assert request.url.path.endswith("/videos")
+        assert "liveStreamingDetails" in request.url.params["part"]
+        return httpx.Response(200, json={"items": videos})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(monitor.httpx, "AsyncClient", lambda **kwargs: client_class(
+        **kwargs, transport=httpx.MockTransport(respond)
+    ))
+    result = asyncio.run(monitor._fetch_recent_singing_streams("uploads"))
+    assert [video["youtube_video_id"] for video in result] == ["archive"]
+    assert result[0]["actual_end_at"].isoformat() == "2026-08-01T11:00:00+00:00"
 
 
 def test_channel_locator_supports_handle_and_channel_id_urls() -> None:

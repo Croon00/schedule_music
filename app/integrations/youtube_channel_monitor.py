@@ -154,7 +154,7 @@ async def poll_youtube_channel_monitors(
 
 
 async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[str, Any]]:
-    """Return every uploaded video whose title identifies it as an utawaku.
+    """Return completed live archives whose title identifies them as an utawaku.
 
     The uploads playlist is paginated at 50 items by YouTube.  A channel
     monitor must therefore follow ``nextPageToken``; otherwise older archives
@@ -210,6 +210,11 @@ async def _fetch_recent_singing_streams(uploads_playlist_id: str) -> list[dict[s
             ),
         }
         for item in video_items
+        # Titles also match Shorts and ordinary uploads. Require evidence of
+        # both an actual broadcast and its completion, excluding scheduled
+        # and currently live videos as well.
+        if (item.get("liveStreamingDetails") or {}).get("actualStartTime")
+        and (item.get("liveStreamingDetails") or {}).get("actualEndTime")
     ]
 
 

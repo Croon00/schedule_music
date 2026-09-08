@@ -483,6 +483,7 @@ def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) 
             LEFT JOIN artists a ON a.id = s.artist_id
             LEFT JOIN source_items si ON si.id = y.source_item_id
             WHERE (%s::text IS NULL OR COALESCE(a.name, y.performer_name, '') ILIKE '%%' || %s || '%%')
+              AND (y.duration_seconds IS NULL OR y.duration_seconds > 420)
             ORDER BY COALESCE(y.broadcast_at, y.published_at) DESC NULLS LAST, y.id DESC
             LIMIT %s
             """,
@@ -579,6 +580,7 @@ def search_youtube_song_performances(
             LEFT JOIN artist_sources s ON s.id = y.source_id
             LEFT JOIN artists a ON a.id = s.artist_id
             WHERE (%s::text[] = ARRAY[]::text[] OR COALESCE(a.name, y.performer_name, '') ILIKE ANY(%s))
+              AND (y.duration_seconds IS NULL OR y.duration_seconds > 420)
               AND (
                 %s::text[] = ARRAY[]::text[]
                 OR p.song_title ILIKE ANY(%s)

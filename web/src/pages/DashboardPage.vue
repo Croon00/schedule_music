@@ -36,7 +36,7 @@ function formatDate(value: string | null): string {
 <template>
   <div class="page">
     <PageHeader
-      eyebrow="LIVE SIGNAL / 01"
+      eyebrow="MUSIC NOTES / 01"
       title="오늘의 운영 상황"
       description="아티스트 소식에서 일정 후보까지, 놓치면 안 되는 신호만 한곳에 모았습니다."
     >
@@ -53,7 +53,7 @@ function formatDate(value: string | null): string {
           <span>수집 중인 아티스트</span>
           <strong>{{ artistsQuery.isPending.value ? '—' : artists.length }}</strong>
         </div>
-        <p>{{ sourceCount }}개 공식 소스 연결</p>
+        <p>{{ sourceCount }}개의 공식 소식을 살피는 중</p>
         <div class="signal-bars"><i /><i /><i /><i /><i /></div>
       </article>
       <article class="metric-card">

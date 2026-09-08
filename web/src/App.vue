@@ -24,7 +24,7 @@ const navigation = [
           <div class="brand__mark">S</div>
           <div>
             <strong>SCHEDULE MUSIC</strong>
-            <span>OPERATIONS CONSOLE</span>
+            <span>音楽のしおり · MUSIC NOTES</span>
           </div>
         </div>
 
@@ -44,8 +44,8 @@ const navigation = [
           <div class="connection-card">
             <span class="connection-card__pulse" :class="{ offline: health.isError.value }" />
             <div>
-              <strong>{{ health.isError.value ? 'API 연결 끊김' : '시스템 정상' }}</strong>
-              <span>{{ health.isFetching.value ? '상태 확인 중' : 'FastAPI 연결 상태' }}</span>
+              <strong>{{ health.isError.value ? '연결을 확인해 주세요' : '조용히 수집 중' }}</strong>
+              <span>{{ health.isFetching.value ? '상태를 확인하고 있어요' : '음악 소식을 살피는 중' }}</span>
             </div>
           </div>
           <p>Asia/Seoul · JST 일정 보존</p>
