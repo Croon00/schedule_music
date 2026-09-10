@@ -38,9 +38,9 @@ async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate, se
 
 
 @router.get("/youtube-lives")
-def get_youtube_lives(service: Service, limit: int = 50, artist_name: str | None = None) -> list[dict]:
+def get_youtube_lives(service: Service, limit: int = 50, artist_name: str | None = None, all_records: bool = False) -> list[dict]:
     """저장된 YouTube 라이브를 조회한다."""
-    return service.list_lives(limit, artist_name)
+    return service.list_lives(limit, artist_name, all_records=all_records)
 
 
 @router.get("/youtube-lives/{archive_id}")

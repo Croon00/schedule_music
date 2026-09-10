@@ -114,6 +114,7 @@ export const api = {
     list: (artistName?: string, limit = 100) => {
       const params = new URLSearchParams({ limit: String(limit) })
       if (artistName) params.set('artist_name', artistName)
+      if (artistName) params.set('all_records', 'true')
       return request<YouTubeLiveArchive[]>(`/youtube-lives?${params.toString()}`)
     },
     get: (id: number) => request<YouTubeLiveArchive>(`/youtube-lives/${id}`),

@@ -1,21 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Artist, YouTubeLiveArchive, YouTubePerformance, YouTubePerformanceSearchResult } from '@/api/types'
 import AppModal from '@/components/AppModal.vue'
 import PageHeader from '@/components/PageHeader.vue'
-
-type SongStatOccurrence = {
-  archiveId: number; youtubeUrl: string; videoTitle: string | null
-  broadcastAt: string | null; publishedAt: string | null; startSeconds: number; timestampText: string
-}
-type SongStat = {
-  title: string; titleKo: string | null; originalArtist: string | null; originalArtistKo: string | null
-  count: number; occurrences: SongStatOccurrence[]
-  artistCandidates: Record<string, { originalArtist: string; originalArtistKo: string | null; count: number }>
-}
+import ScrollMore from '@/components/ScrollMore.vue'
+import { inMonthRange } from '@/utils/archiveFilters'
+import { buildSongStats, type SongStat, type SongStatOccurrence } from '@/utils/songStats'
 
 const queryClient = useQueryClient()
 const route = useRoute()
@@ -30,6 +23,11 @@ const viewMode = ref<'grid' | 'list'>('grid')
 const collectionMode = ref<'lives' | 'stats'>('lives')
 const songQuery = ref('')
 const statsSort = ref<'asc' | 'desc'>('asc')
+const startMonth = ref('')
+const endMonth = ref('')
+const archiveShown = ref(20)
+const statsShown = ref(40)
+const invalidRange = computed(() => Boolean(startMonth.value && endMonth.value && startMonth.value > endMonth.value))
 const registrationOpen = ref(false)
 const detailOpen = ref(false)
 const statsDetailOpen = ref(false)
@@ -68,6 +66,7 @@ const archives = useQuery({
   queryKey: computed(() => ['youtube-lives', selectedArtist.value?.name ?? '']),
   queryFn: () => api.youtubeLives.list(selectedArtist.value?.name),
   enabled: computed(() => selectedArtist.value !== null),
+  refetchInterval: 60_000,
 })
 const detail = useQuery({
   queryKey: computed(() => ['youtube-live', selectedId.value]),
@@ -96,143 +95,18 @@ const searchPerformances = useMutation({
   }),
   onSuccess: (rows) => { searchResults.value = rows },
 })
-function normalizeSongTitle(value: string): string {
-  let title = value
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-
-  // 댓글/셋리스트에서 흔히 붙는 표기를 제거한다. 실제 곡명은 표시용으로 유지한다.
-  title = title
-    .replace(/^\s*[「『【［(（]\s*/u, '')
-    .replace(/\s*[」』】］)）]\s*$/u, '')
-    .replace(/\s*[（(［\[]\s*(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*[）)］\]]\s*$/iu, '')
-    .replace(/\s*(?:[-\u2013\u2014|\uff5c/\uff0f:\uff1a]\s*|\s+)(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|acoustic(?:\s+(?:ver(?:sion)?|version))?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)\s*$/iu, '')
-
-  return stripSetlistAttribution(title).trim()
-}
-
-const PERFORMANCE_NOTE = /(?:cover|\u6b4c\u3063\u3066\u307f\u305f|\u30ab\u30d0\u30fc|\u5f3e\u304d\u8a9e\u308a|\u30d4\u30a2\u30ce|\u30ae\u30bf\u30fc|acoustic|live|\u97f3\u6e90|inst(?:rumental)?|original|\u30aa\u30ea\u30b8\u30ca\u30eb)/iu
-const JAPANESE_TEXT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u
-
-function stripSetlistAttribution(value: string): string {
-  let title = value
-
-  // Drop a trailing performance note, but never parentheses that are part of
-  // the actual title unless they clearly describe a cover/arrangement.
-  while (true) {
-    const match = title.match(/\s*[\uff08(]\s*([^\uff09)]{1,80})\s*[\uff09)]\s*$/u)
-    if (!match || !PERFORMANCE_NOTE.test(match[1])) break
-    title = title.slice(0, match.index).trim()
-  }
-
-  // Setlists frequently append the original artist or singer after a slash.
-  // Strip it when it is explicitly a performance label, or when a Latin title
-  // has a Japanese credit (for example, `rain stops, good-bye / \u306b\u304aP`).
-  const slashMatch = title.match(/^(?<song>.+?)\s*[/\uff0f|\uff5c]\s*(?<credit>[^/\uff0f|\uff5c]{1,40})$/u)
-  if (slashMatch?.groups) {
-    const { song, credit } = slashMatch.groups
-    if (PERFORMANCE_NOTE.test(credit) || (/[A-Za-z]/u.test(song) && JAPANESE_TEXT.test(credit))) {
-      title = song.trim()
-    }
-  }
-
-  return title
-}
-
-function songStatsKey(title: string): string {
-  // 공백, 전각/반각, 문장부호의 차이는 같은 곡으로 간주한다.
-  return title
-    .normalize('NFKC')
-    .toLocaleLowerCase()
-    .replace(/[\p{P}\p{Z}\p{Cf}]/gu, '')
-}
-
-function cleanSongTitle(value: string): string | null {
-  const title = normalizeSongTitle(value)
-  if (!title || /^start(?:\b|[：:\-])/i.test(title)) return null
-  const withoutIndex = title.replace(/^(?:#\s*)?(?:제\s*)?\d+\s*(?:곡목?|曲目?)?\s*(?:[.．:：\-—)]\s*)+/u, '').trim()
-  return withoutIndex && !/^start(?:\b|[：:\-])/i.test(withoutIndex) ? withoutIndex : null
-}
-function addSongStatArtistCandidate(song: SongStat, originalArtist: string | null, originalArtistKo: string | null): void {
-  if (!originalArtist) return
-  const key = songStatsKey(originalArtist)
-  if (!key) return
-  const candidate = song.artistCandidates[key]
-  if (candidate) candidate.count += 1
-  else song.artistCandidates[key] = { originalArtist, originalArtistKo, count: 1 }
-}
-const songStats = computed(() => {
-  const songs = new Map<string, SongStat>()
-  for (const archive of archives.data.value ?? []) {
-    const entries = archive.performances?.length
-      ? archive.performances.map((performance) => ({
-          title: performance.song_title,
-          titleKo: performance.song_title_ko,
-          originalArtist: performance.original_artist,
-          originalArtistKo: performance.original_artist_ko,
-          startSeconds: performance.start_seconds,
-          timestampText: performance.timestamp_text,
-        }))
-      : (archive.setlist ?? []).map((entry) => ({
-          title: entry.title, titleKo: null, originalArtist: null, originalArtistKo: null,
-          startSeconds: timestampToSeconds(entry.timestamp), timestampText: entry.timestamp,
-        }))
-    for (const entry of entries) {
-      const title = cleanSongTitle(entry.title)
-      if (!title) continue
-      const key = songStatsKey(title)
-      const song = songs.get(key)
-      if (song) {
-        song.count += 1
-        song.occurrences.push({
-          archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,
-          broadcastAt: archive.broadcast_at, publishedAt: archive.published_at,
-          startSeconds: entry.startSeconds, timestampText: entry.timestampText,
-        })
-        // 같은 곡의 표기가 여러 개면, 보통 더 짧은 쪽이 주석이 덜 붙은 제목이다.
-        if (title.length < song.title.length) {
-          song.title = title
-          song.titleKo = entry.titleKo
-        }
-        addSongStatArtistCandidate(song, entry.originalArtist, entry.originalArtistKo)
-      }
-      else {
-        const song: SongStat = {
-          title,
-          titleKo: entry.titleKo,
-          originalArtist: entry.originalArtist,
-          originalArtistKo: entry.originalArtistKo,
-          count: 1,
-          occurrences: [{
-          archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,
-          broadcastAt: archive.broadcast_at, publishedAt: archive.published_at,
-          startSeconds: entry.startSeconds, timestampText: entry.timestampText,
-          }],
-          artistCandidates: {},
-        }
-        addSongStatArtistCandidate(song, entry.originalArtist, entry.originalArtistKo)
-        songs.set(key, song)
-      }
-    }
-  }
-  const query = songQuery.value.trim().toLocaleLowerCase()
-  return [...songs.values()]
-    .map((song) => {
-      const primaryArtist = Object.values(song.artistCandidates)
-        .sort((left, right) => right.count - left.count)[0]
-      if (primaryArtist) {
-        song.originalArtist = primaryArtist.originalArtist
-        song.originalArtistKo = primaryArtist.originalArtistKo
-      }
-      return song
-    })
-    .filter((song) => !query || song.title.toLocaleLowerCase().includes(query))
-    .sort((left, right) => statsSort.value === 'asc'
-      ? left.count - right.count || left.title.localeCompare(right.title)
-      : right.count - left.count || left.title.localeCompare(right.title))
+const filteredArchives = computed(() => (archives.data.value ?? []).filter(archive =>
+  inMonthRange(archive.broadcast_at || archive.published_at, startMonth.value, endMonth.value),
+))
+const visibleArchives = computed(() => filteredArchives.value.slice(0, archiveShown.value))
+watch([selectedArtistId, startMonth, endMonth, collectionMode], () => {
+  archiveShown.value = 20
+  statsShown.value = 40
+  statsDetailOpen.value = false
 })
+watch([songQuery, statsSort], () => { statsShown.value = 40 })
+const songStats = computed(() => buildSongStats(filteredArchives.value, songQuery.value, statsSort.value))
+const visibleSongStats = computed(() => songStats.value.slice(0, statsShown.value))
 const updatePerformance = useMutation({
   mutationFn: () => api.youtubePerformances.update(editingPerformanceId.value!, performanceDraft.value),
   onSuccess: async () => {
@@ -433,6 +307,15 @@ function hideBrokenImage(event: Event): void {
       <UButton class="collection-toggle" @click="collectionMode = collectionMode === 'lives' ? 'stats' : 'lives'">{{ collectionMode === 'lives' ? '통계' : 'Live Collection' }}</UButton>
     </section>
 
+    <section v-if="selectedArtist" class="archive-period" aria-label="방송 기간 검색">
+      <label>시작 연월<UInput v-model="startMonth" type="month" aria-label="시작 연월" /></label>
+      <span>~</span>
+      <label>종료 연월<UInput v-model="endMonth" type="month" aria-label="종료 연월" /></label>
+      <UButton variant="outline" @click="startMonth = ''; endMonth = ''">전체 기간</UButton>
+      <p v-if="invalidRange" role="alert">종료 연월은 시작 연월 이후로 선택해 주세요.</p>
+      <p v-else>{{ startMonth || '처음' }} ~ {{ endMonth || '현재' }} · {{ filteredArchives.length }}개 방송 기준 · 한국 시간</p>
+    </section>
+
     <section v-if="selectedArtist && collectionMode === 'lives'" class="archive-heading">
       <div>
         <p class="eyebrow">LIVE COLLECTION</p>
@@ -440,7 +323,7 @@ function hideBrokenImage(event: Event): void {
         <p>저장된 방송을 선택하면 타임스탬프별 셋리스트를 확인할 수 있습니다.</p>
       </div>
       <div class="archive-actions">
-        <span class="count-label">{{ archives.data.value?.length || 0 }} LIVES</span>
+        <span class="count-label">{{ filteredArchives.length }} LIVES</span>
         <div class="view-toggle" aria-label="보기 방식">
           <UButton :class="{ active: viewMode === 'grid' }" aria-label="카드 보기" @click="viewMode = 'grid'">▦</UButton>
           <UButton :class="{ active: viewMode === 'list' }" aria-label="목록 보기" @click="viewMode = 'list'">☷</UButton>
@@ -450,9 +333,9 @@ function hideBrokenImage(event: Event): void {
 
     <div v-if="selectedArtist && collectionMode === 'lives' && archives.isPending.value" class="archive-grid"><i v-for="n in 6" :key="n" class="archive-card loading" /></div>
     <div v-else-if="selectedArtist && collectionMode === 'lives' && archives.isError.value" class="alert alert--error">우타와꾸 기록을 불러오지 못했습니다.</div>
-    <div v-else-if="selectedArtist && collectionMode === 'lives' && !archives.data.value?.length" class="panel empty-state"><span>♫</span><strong>저장된 우타와꾸가 없습니다</strong><p>오른쪽 아래 등록 버튼으로 첫 방송을 추가할 수 있습니다.</p></div>
+    <div v-else-if="selectedArtist && collectionMode === 'lives' && !filteredArchives.length" class="panel empty-state"><span>♫</span><strong>해당 기간의 우타와꾸 기록이 없습니다</strong><p>다른 기간을 선택하거나 전체 기간으로 확인해 주세요.</p></div>
     <div v-else-if="selectedArtist && collectionMode === 'lives'" :class="viewMode === 'grid' ? 'archive-grid' : 'archive-list'">
-      <UButton v-for="archive in archives.data.value" :key="archive.id" :class="viewMode === 'grid' ? 'archive-card' : 'archive-row'" @click="openArchive(archive)">
+      <UButton v-for="archive in visibleArchives" :key="archive.id" :class="viewMode === 'grid' ? 'archive-card' : 'archive-row'" @click="openArchive(archive)">
         <div class="archive-cover">
           <img v-if="thumbnail(archive)" :src="thumbnail(archive)" :alt="archive.video_title || archive.artist_name" />
           <span v-else>▶</span>
@@ -466,18 +349,22 @@ function hideBrokenImage(event: Event): void {
       </UButton>
     </div>
 
+    <ScrollMore v-if="selectedArtist && collectionMode === 'lives' && filteredArchives.length" :shown="archiveShown" :total="filteredArchives.length" @more="archiveShown += 20" />
+
     <section v-if="selectedArtist && collectionMode === 'stats'" class="song-stats panel">
       <div class="song-stats__header">
         <div><p class="eyebrow">SONG STATISTICS</p><h2>우타와꾸 곡 통계</h2><p>방송 셋리스트에서 집계한 곡별 누적 횟수입니다.</p></div>
         <span class="count-label">{{ songStats.length }} SONGS</span>
       </div>
       <div class="song-stats__toolbar">
-        <UInput v-model="songQuery" placeholder="곡 제목 검색" aria-label="곡 제목 검색" />
+        <UInput v-model="songQuery" placeholder="곡 제목 · 가수 검색 (한글 / 원문)" aria-label="곡 제목 또는 가수 검색" />
         <UButton class="song-sort" @click="statsSort = statsSort === 'asc' ? 'desc' : 'asc'">{{ statsSort === 'asc' ? '횟수 오름차순' : '횟수 내림차순' }}</UButton>
       </div>
       <div v-if="archives.isPending.value" class="empty-state compact"><strong>곡 통계를 준비하고 있습니다.</strong></div>
+      <div v-else-if="archives.isError.value" class="alert alert--error">곡 통계를 불러오지 못했습니다.</div>
       <div v-else-if="!songStats.length" class="empty-state compact"><strong>표시할 곡 통계가 없습니다.</strong></div>
-      <ol v-else class="song-stats__list"><li v-for="(song, index) in songStats" :key="song.title"><span>{{ index + 1 }}</span><button type="button" class="song-stats__title" @click="openSongStats(song)"><strong>{{ pairedLabel(song.title, song.titleKo) }}</strong><small v-if="song.originalArtist">{{ pairedLabel(song.originalArtist, song.originalArtistKo) }}</small></button><b>{{ song.count }}회</b></li></ol>
+      <ol v-else class="song-stats__list"><li v-for="(song, index) in visibleSongStats" :key="song.title"><span>{{ index + 1 }}</span><button type="button" class="song-stats__title" @click="openSongStats(song)"><strong>{{ pairedLabel(song.title, song.titleKo) }}</strong><small v-if="song.originalArtist">{{ pairedLabel(song.originalArtist, song.originalArtistKo) }}</small></button><b>{{ song.count }}회</b></li></ol>
+      <ScrollMore v-if="songStats.length" :shown="statsShown" :total="songStats.length" @more="statsShown += 40" />
     </section>
 
     <AppModal :open="statsDetailOpen" :title="selectedStatSong ? pairedLabel(selectedStatSong.title, selectedStatSong.titleKo) : '곡 가창 기록'" :description="selectedStatSong ? `${selectedStatSong.count}회 가창 기록` : ''" @close="statsDetailOpen = false">
@@ -558,6 +445,9 @@ function hideBrokenImage(event: Event): void {
 </template>
 
 <style scoped>
+.archive-period { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:0 0 24px; padding:18px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+.archive-period label { display:grid; gap:8px; color:var(--muted); font-size:12px; }
+.archive-period p { flex-basis:100%; margin:0; color:var(--muted); font-size:12px; }
 .artist-section{margin-bottom:36px}.section-heading,.archive-heading{display:flex;align-items:end;justify-content:space-between;gap:20px}.section-heading{margin-bottom:13px}.section-heading h2,.archive-heading h2{margin:0}.artist-selector{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(145px,190px);gap:10px;overflow-x:auto;padding:3px 2px 12px}.artist-select-card{min-height:112px;padding:16px;border:1px solid var(--line);border-radius:11px;color:#8b98ad;background:var(--panel);text-align:left;cursor:pointer;transition:.2s}.artist-select-card>span{display:grid;place-items:center;width:34px;height:34px;margin-bottom:13px;border:1px solid rgba(50,214,255,.24);border-radius:9px;color:var(--cyan);background:rgba(50,214,255,.06);font:700 12px ui-monospace,monospace}.artist-select-card strong,.artist-select-card small{display:block}.artist-select-card strong{overflow:hidden;color:#d9e3ef;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.artist-select-card small{margin-top:6px;color:#56647a;font:8px ui-monospace,monospace}.artist-select-card:hover,.artist-select-card.active{transform:translateY(-2px);border-color:rgba(50,214,255,.45);background:linear-gradient(145deg,rgba(50,214,255,.1),rgba(154,124,255,.04));box-shadow:0 12px 30px rgba(0,0,0,.2)}.loading{background:linear-gradient(100deg,#101622 20%,#1a2230 40%,#101622 60%);background-size:200%;animation:shimmer 1.5s infinite}.archive-heading{margin-bottom:17px;padding-top:22px;border-top:1px solid var(--line)}.archive-heading>div>p:last-child{margin:8px 0 0;color:#6f7d92;font-size:10px}.archive-actions{display:flex;align-items:center;gap:13px}.view-toggle{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}.view-toggle button{width:38px;height:34px;border:0;border-right:1px solid var(--line);color:#657287;background:transparent;cursor:pointer}.view-toggle button:last-child{border-right:0}.view-toggle button.active{color:var(--cyan);background:rgba(50,214,255,.08)}.archive-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:15px}.archive-card,.archive-row{padding:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;color:inherit;background:var(--panel);text-align:left;cursor:pointer;transition:.22s}.archive-card:hover,.archive-row:hover{transform:translateY(-3px);border-color:rgba(50,214,255,.35);box-shadow:0 16px 36px rgba(0,0,0,.24)}.archive-cover{position:relative;aspect-ratio:16/9;display:grid;place-items:center;overflow:hidden;color:var(--cyan);background:#0d1420;font-size:25px}.archive-cover img{width:100%;height:100%;object-fit:cover;transition:transform .3s}.archive-card:hover img,.archive-row:hover img{transform:scale(1.035)}.archive-cover b{position:absolute;right:9px;bottom:9px;padding:5px 7px;border-radius:5px;color:white;background:rgba(4,7,12,.82);font:700 8px ui-monospace,monospace}.archive-meta{padding:14px}.archive-meta small,.archive-meta strong,.archive-meta span{display:block}.archive-meta small{color:#607087;font:8px ui-monospace,monospace}.archive-meta strong{display:-webkit-box;overflow:hidden;margin-top:8px;color:#dae4ef;font-size:12px;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2}.archive-meta span{margin-top:8px;color:#758399;font-size:9px}.archive-list{display:grid;gap:8px}.archive-row{display:grid;grid-template-columns:190px 1fr;align-items:center}.archive-row .archive-cover{aspect-ratio:16/9}.performance-search-panel{margin-top:28px}.performance-search-panel summary{display:flex;justify-content:space-between;cursor:pointer;list-style:none}.performance-search-panel summary b,.performance-search-panel summary small{display:block}.performance-search-panel summary b{font-size:12px}.performance-search-panel summary small{margin-top:6px;color:#657287;font-size:9px}.performance-search-panel summary em{color:var(--cyan);font:normal 9px ui-monospace,monospace}.performance-search-panel[open] summary{margin-bottom:20px}.performance-search{display:grid;grid-template-columns:150px 1fr auto;gap:10px}.performance-results{overflow:auto;margin-top:16px}.performance-results td span{display:block;opacity:.65;margin-top:4px}.floating-register{position:fixed;right:30px;bottom:28px;z-index:40;display:flex;align-items:center;gap:9px;padding:13px 17px;border:1px solid rgba(50,214,255,.55);border-radius:999px;color:#061219;background:linear-gradient(135deg,#5ce0ff,#25bfe9);box-shadow:0 15px 40px rgba(25,190,230,.25);font-size:11px;font-weight:800;cursor:pointer}.floating-register span{font-size:18px;line-height:1}.video-link{position:relative;display:block;overflow:hidden;margin-bottom:18px;border-radius:9px;background:#0a1019}.video-link img{display:block;width:100%;max-height:270px;object-fit:cover;opacity:.75}.video-link>span{position:absolute;inset:auto 14px 13px;color:white;font-size:10px;font-weight:800}.setlist-list{list-style:none;padding:0;margin:0;display:grid}.setlist-list li{display:grid;grid-template-columns:5rem 1fr auto;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--line)}.setlist-list a{color:var(--cyan)}.setlist-list small{display:block;margin-top:4px;color:#68768b}.karaoke-numbers{line-height:1.6;white-space:nowrap}.empty-state.compact{min-height:120px}@media(max-width:800px){.archive-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.archive-row{grid-template-columns:120px 1fr}.performance-search{grid-template-columns:1fr}.floating-register{right:18px;bottom:18px}.setlist-list li{grid-template-columns:4rem 1fr}.karaoke-numbers{display:none}}@media(max-width:520px){.archive-grid{grid-template-columns:1fr}.artist-selector{grid-auto-columns:135px}}
 .artist-select-card>.artist-image{position:relative;width:52px;height:52px;overflow:hidden;border-radius:50%}.artist-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.artist-image b{font:700 12px ui-monospace,monospace}.avatar-credit{display:block;margin-top:2px;color:#48566c;font-size:10px;text-align:right}
 .artist-selector--grid{grid-template-columns:repeat(4,minmax(0,1fr))}.artist-selector--grid .artist-select-card{min-height:210px;padding:20px}.artist-selector--grid .artist-select-card strong{font-size:15px}.artist-selector--grid .artist-select-card small{font-size:10px}.artist-selector--grid .artist-select-card>.artist-image{width:92px;height:92px}

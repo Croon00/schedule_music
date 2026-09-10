@@ -267,6 +267,7 @@ async def add_youtube_live_url(
     await _translate_korean_song_titles(archive_id)
     if enrich_karaoke:
         await _enrich_karaoke_numbers(archive_id)
+    await _translate_korean_original_artists(archive_id)
     return int(archive_id)
 
 
@@ -408,8 +409,8 @@ def _replace_song_performances(
             cursor.executemany(
                 """
                 INSERT INTO youtube_song_performances (
-                    archive_id, performed_on, start_seconds, timestamp_text, song_title
-                ) VALUES (%s, %s, %s, %s, %s)
+                    archive_id, performed_on, start_seconds, timestamp_text, song_title, original_artist
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 [
                     (
@@ -418,6 +419,7 @@ def _replace_song_performances(
                         _timestamp_to_seconds(entry["timestamp"]),
                         entry["timestamp"],
                         split_song_credit(entry["title"])[0],
+                        split_song_credit(entry["title"])[1] or None,
                     )
                     for entry in setlist
                 ],
@@ -462,7 +464,7 @@ async def _enrich_karaoke_numbers(archive_id: int) -> None:
     await _translate_korean_original_artists(archive_id)
 
 
-def list_youtube_live_archives(limit: int = 20, artist_name: str | None = None) -> list[dict[str, Any]]:
+def list_youtube_live_archives(limit: int | None = 20, artist_name: str | None = None) -> list[dict[str, Any]]:
     """Return recent YouTube live archives with artist and X-post context."""
     with get_connection() as conn:
         archives = conn.execute(

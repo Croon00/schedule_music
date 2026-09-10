@@ -26,9 +26,10 @@ class YouTubeService:
         """채널의 과거 라이브를 수집한다."""
         backfill_youtube_channel(channel_url, artist_name)
 
-    def list_lives(self, limit: int, artist_name: str | None) -> list[dict[str, Any]]:
+    def list_lives(self, limit: int, artist_name: str | None, all_records: bool = False) -> list[dict[str, Any]]:
         """저장된 YouTube 라이브 목록을 조회한다."""
-        return list_youtube_live_archives(limit=max(1, min(limit, 100)), artist_name=artist_name.strip() if artist_name else None)
+        artist_name = (artist_name or '').strip() or None
+        return list_youtube_live_archives(limit=None if all_records and artist_name else max(1, min(limit, 100)), artist_name=artist_name)
 
     async def get_live(self, archive_id: int) -> dict[str, Any] | None:
         """한국어 메타데이터를 보완한 라이브 상세 정보를 조회한다."""

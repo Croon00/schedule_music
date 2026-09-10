@@ -132,6 +132,8 @@ async def _translate_title_batch(candidates: list[tuple[str, str]]) -> dict[str,
                 "role": "system",
                 "content": (
                     "Translate Japanese song titles into concise, natural Korean titles. "
+                    "Return a result for every input ID. If an entry is an announcement "
+                    "or spoken segment rather than a song, translate that label too; never omit it. "
                     "Do not add explanations, artists, punctuation, or parentheses. "
                     "Keep established English words as written."
                 ),
