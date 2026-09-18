@@ -7,6 +7,7 @@ export type SongStatOccurrence = {
 }
 export type SongStat = {
   title: string; titleKo: string | null; originalArtist: string | null; originalArtistKo: string | null
+  tjNumbers: string[]
   count: number; occurrences: SongStatOccurrence[]
   artistCandidates: Record<string, { originalArtist: string; originalArtistKo: string | null; count: number }>
 }
@@ -102,11 +103,13 @@ export function buildSongStats(archives: YouTubeLiveArchive[], search: string, s
           titleKo: performance.song_title_ko,
           originalArtist: performance.original_artist,
           originalArtistKo: performance.original_artist_ko,
+          tjNumber: performance.tj_number,
           startSeconds: performance.start_seconds,
           timestampText: performance.timestamp_text,
         }))
       : (archive.setlist ?? []).map((entry) => ({
           title: entry.title, titleKo: null, originalArtist: null, originalArtistKo: null,
+          tjNumber: '등록X',
           startSeconds: timestampToSeconds(entry.timestamp), timestampText: entry.timestamp,
         }))
     for (const entry of entries) {
@@ -127,6 +130,7 @@ export function buildSongStats(archives: YouTubeLiveArchive[], search: string, s
           song.titleKo = entry.titleKo || song.titleKo
         }
         song.titleKo ||= entry.titleKo
+        if (/^\d+$/u.test(entry.tjNumber) && !song.tjNumbers.includes(entry.tjNumber)) song.tjNumbers.push(entry.tjNumber)
         addSongStatArtistCandidate(song, entry.originalArtist, entry.originalArtistKo)
       }
       else {
@@ -135,6 +139,7 @@ export function buildSongStats(archives: YouTubeLiveArchive[], search: string, s
           titleKo: entry.titleKo,
           originalArtist: entry.originalArtist,
           originalArtistKo: entry.originalArtistKo,
+          tjNumbers: /^\d+$/u.test(entry.tjNumber) ? [entry.tjNumber] : [],
           count: 1,
           occurrences: [{
           archiveId: archive.id, youtubeUrl: archive.youtube_url, videoTitle: archive.video_title,

@@ -392,7 +392,7 @@ function hideBrokenImage(event: Event): void {
       <div v-if="archives.isPending.value" class="empty-state compact"><strong>곡 통계를 준비하고 있습니다.</strong></div>
       <div v-else-if="archives.isError.value" class="alert alert--error">곡 통계를 불러오지 못했습니다.</div>
       <div v-else-if="!songStats.length" class="empty-state compact"><strong>표시할 곡 통계가 없습니다.</strong></div>
-      <ol v-else class="song-stats__list"><li v-for="(song, index) in visibleSongStats" :key="song.title"><span>{{ index + 1 }}</span><button type="button" class="song-stats__title" @click="openSongStats(song)"><strong>{{ pairedLabel(song.title, song.titleKo) }}</strong><small v-if="song.originalArtist">{{ pairedLabel(song.originalArtist, song.originalArtistKo) }}</small></button><b>{{ song.count }}회</b></li></ol>
+      <ol v-else class="song-stats__list"><li v-for="(song, index) in visibleSongStats" :key="song.title"><span>{{ index + 1 }}</span><button type="button" class="song-stats__title" @click="openSongStats(song)"><strong>{{ pairedLabel(song.title, song.titleKo) }}</strong><small v-if="song.originalArtist">{{ pairedLabel(song.originalArtist, song.originalArtistKo) }}</small><small v-if="song.tjNumbers.length">TJ {{ song.tjNumbers.join(' · ') }}</small></button><b>{{ song.count }}회</b></li></ol>
       <ScrollMore v-if="songStats.length" :shown="statsShown" :total="songStats.length" @more="statsShown += 40" />
     </section>
 
