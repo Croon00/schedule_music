@@ -24,6 +24,7 @@ from app.core.db import get_connection
 from app.integrations.youtube_context import fetch_setlist_comment
 from app.integrations.youtube_live_archive import (
     _save_check_result,
+    _translate_korean_original_artists,
     parse_setlist_comment,
 )
 
@@ -75,9 +76,9 @@ async def retry_pending_setlists(
                     comment=context.text if context else None,
                     setlist=setlist,
                     metadata=None,
-                    translate_titles=False,
                 )
                 if setlist:
+                    await _translate_korean_original_artists(row["id"])
                     result["setlists_found"] += 1
                     artist = row["performer_name"] or "(unassigned)"
                     result["found_by_artist"][artist] = result["found_by_artist"].get(artist, 0) + 1
