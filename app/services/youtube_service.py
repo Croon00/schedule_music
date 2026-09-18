@@ -25,9 +25,9 @@ class YouTubeService:
         archive_id = await add_youtube_live_url(youtube_url, artist_name)
         return get_youtube_live_archive(archive_id)
 
-    def backfill_channel(self, channel_url: str, artist_name: str) -> None:
+    async def backfill_channel(self, channel_url: str, artist_name: str) -> dict[str, int]:
         """채널의 과거 라이브를 수집한다."""
-        backfill_youtube_channel(channel_url, artist_name)
+        return await backfill_youtube_channel(channel_url=channel_url, artist_name=artist_name)
 
     def list_lives(self, limit: int, artist_name: str | None, all_records: bool = False) -> list[dict[str, Any]]:
         """저장된 YouTube 라이브 목록을 조회한다."""

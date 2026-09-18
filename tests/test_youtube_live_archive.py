@@ -39,6 +39,18 @@ def test_parse_setlist_comment_accepts_arbitrary_prefixes() -> None:
     ]
 
 
+def test_parse_setlist_comment_keeps_only_song_and_artist_from_timestamp_ranges() -> None:
+    comment = """
+    1曲目 08:36~13:14「変わらないもの／奥華子」 95.192点
+    2曲目 15:57〜20:39『茜色の約束 / いきものがかり』 96.446点
+    """
+
+    assert parse_setlist_comment(comment) == [
+        {"timestamp": "08:36", "title": "変わらないもの/奥華子"},
+        {"timestamp": "15:57", "title": "茜色の約束 / いきものがかり"},
+    ]
+
+
 def test_timestamp_to_seconds_supports_hour_timestamp() -> None:
     assert _timestamp_to_seconds("1:04:59") == 3899
     assert _timestamp_to_seconds("12:03") == 723

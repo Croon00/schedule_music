@@ -31,7 +31,7 @@ async def create_youtube_live(payload: YouTubeLiveCreate, service: Service) -> d
 @router.post("/youtube-lives/backfills", status_code=status.HTTP_202_ACCEPTED)
 async def create_youtube_live_backfill(payload: YouTubeChannelBackfillCreate, service: Service) -> dict[str, str]:
     """채널 과거 라이브 수집 작업을 백그라운드로 시작한다."""
-    task = asyncio.create_task(asyncio.to_thread(service.backfill_channel, str(payload.channel_url), payload.artist_name))
+    task = asyncio.create_task(service.backfill_channel(str(payload.channel_url), payload.artist_name))
     _backfill_tasks.add(task)
     task.add_done_callback(_backfill_tasks.discard)
     return {"status": "accepted"}

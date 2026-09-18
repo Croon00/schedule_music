@@ -25,6 +25,14 @@ TIMESTAMP_LINE_RE = re.compile(
     r"(?:\s*[-–—|｜:：.]?\s*)"
     r"(?P<title>.+?)\s*$"
 )
+SETLIST_RANGE_END_RE = re.compile(
+    r"^\s*[~〜～\-–—]\s*(?:\d{1,2}:)?[0-5]?\d:[0-5]\d\s*"
+)
+SETLIST_SCORE_SUFFIX_RE = re.compile(
+    r"\s+[0-9０-９]+(?:[.．][0-9０-９]+)?(?:点|pts?\.?)?\s*$",
+    re.IGNORECASE,
+)
+SETLIST_QUOTED_SONG_RE = re.compile(r'[「『"](?P<song>.+?)[」』"]')
 MAX_ARCHIVE_ATTEMPTS = 168
 SETLIST_TITLE_PREFIX_RE = re.compile(
     r"^(?:#\s*)?(?:제\s*)?\d+\s*(?:곡목?|曲目?)?\s*(?:[.．:：\-—)]\s*)+",
@@ -273,13 +281,13 @@ async def add_youtube_live_url(
 
 
 def parse_setlist_comment(text: str) -> list[dict[str, str]]:
-    """Extract timestamp/song pairs from a YouTube top comment."""
+    """Extract timestamp/song pairs, retaining only song title and artist credit."""
     entries: list[dict[str, str]] = []
     for line in text.splitlines():
         match = TIMESTAMP_LINE_RE.search(line)
         if not match:
             continue
-        title = SETLIST_TITLE_PREFIX_RE.sub("", match.group("title").strip()).strip()
+        title = _normalise_setlist_song(match.group("title"))
         if not title or re.match(r"^start(?:\b|[：:\-])", title, re.IGNORECASE):
             continue
         entries.append(
@@ -289,6 +297,17 @@ def parse_setlist_comment(text: str) -> list[dict[str, str]]:
             }
         )
     return entries
+
+
+def _normalise_setlist_song(value: str) -> str:
+    """Remove range endpoints, scores, labels, and quote wrappers from a song row."""
+    cleaned = SETLIST_TITLE_PREFIX_RE.sub("", value.strip())
+    cleaned = SETLIST_RANGE_END_RE.sub("", cleaned)
+    quoted = SETLIST_QUOTED_SONG_RE.search(cleaned)
+    if quoted:
+        cleaned = quoted.group("song")
+    cleaned = SETLIST_SCORE_SUFFIX_RE.sub("", cleaned).strip()
+    return cleaned.replace("／", "/").replace("｜", "/")
 
 
 async def refresh_pending_youtube_lives(limit: int = 10) -> int:
@@ -346,6 +365,7 @@ async def _save_check_result(
     comment: str | None,
     setlist: list[dict[str, str]],
     metadata: Any | None,
+    translate_titles: bool = True,
 ) -> None:
     status = "ready" if setlist else "pending"
     with get_connection() as conn:
@@ -376,7 +396,8 @@ async def _save_check_result(
         conn.commit()
     if setlist:
         _replace_song_performances(archive_id, setlist)
-        await _translate_korean_song_titles(archive_id)
+        if translate_titles:
+            await _translate_korean_song_titles(archive_id)
 
 
 def _timestamp_to_seconds(timestamp: str) -> int:
